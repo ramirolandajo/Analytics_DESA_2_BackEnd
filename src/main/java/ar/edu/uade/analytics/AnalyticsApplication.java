@@ -2,8 +2,10 @@ package ar.edu.uade.analytics;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 
 @SpringBootApplication
+@EntityScan(basePackages = "ar.edu.uade.analytics.Entity")
 public class AnalyticsApplication {
 
     public static void main(String[] args) {
