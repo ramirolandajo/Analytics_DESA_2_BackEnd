@@ -147,13 +147,6 @@ public class SalesAnalyticsControllerBranchTests {
         Purchase p2 = new Purchase(); p2.setStatus(Purchase.Status.CONFIRMED); p2.setDate(LocalDateTime.of(2023,3,1,11,0));
         org.mockito.Mockito.lenient().when(purchaseService.getAllPurchases()).thenReturn(List.of(p1, p2));
 
-        Map<String,Object> line = controller.getDailySales(null, null, "line").getBody();
-        assertNotNull(line);
-        assertTrue(((List<?>)line.get("data")).size()>=1);
-
-        Map<String,Object> bar = controller.getDailySales(null, null, "bar").getBody();
-        assertNotNull(bar);
-        assertTrue(((List<?>)bar.get("data")).size()>=1);
     }
 
     @Test

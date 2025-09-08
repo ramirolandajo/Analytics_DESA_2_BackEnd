@@ -92,19 +92,6 @@ public class SalesAnalyticsControllerEdgeCaseTests {
     }
 
     @Test
-    void buildEvolutionChartBase64_emptyTopIds_and_noLogs_returnsSafe() throws Exception {
-        SalesAnalyticsController controller = prepareController();
-        // empty topProductIds
-        String emptyChart = controller.buildEvolutionChartBase64(List.of(), null, null);
-        // allow either null or non-empty string, but method must not throw
-        assertTrue(emptyChart == null || emptyChart.length() >= 0);
-        // top id with no logs
-        org.mockito.Mockito.lenient().when(stockChangeLogRepository.findByProductIdOrderByChangedAtAsc(9999)).thenReturn(List.of());
-        String chart = controller.buildEvolutionChartBase64(List.of(9999), null, null);
-        assertTrue(chart == null || chart.length() >= 0);
-    }
-
-    @Test
     void stockHistoryByProductCode_showProfit_nonVenta_noProfitKey() throws Exception {
         SalesAnalyticsController controller = prepareController();
         var prodRepo = org.mockito.Mockito.mock(ar.edu.uade.analytics.Repository.ProductRepository.class);

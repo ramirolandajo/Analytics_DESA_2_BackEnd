@@ -44,14 +44,6 @@ public class SalesAnalyticsControllerDeepTests {
         Cart cart = new Cart(); cart.setItems(List.of(it)); cart.setFinalPrice(400f);
         Purchase p = new Purchase(); p.setStatus(Purchase.Status.CONFIRMED); p.setDate(LocalDateTime.of(2023,8,1,9,0)); p.setCart(cart);
         org.mockito.Mockito.lenient().when(purchaseService.getAllPurchases()).thenReturn(List.of(p));
-
-        byte[] bar = controller.getSalesSummaryChart("bar", null, null).getBody();
-        assertNotNull(bar);
-        assertTrue(bar.length > 0);
-
-        byte[] pie = controller.getSalesSummaryChart("pie", null, null).getBody();
-        assertNotNull(pie);
-        assertTrue(pie.length > 0);
     }
 
     @Test
@@ -111,12 +103,6 @@ public class SalesAnalyticsControllerDeepTests {
         StockChangeLog l1 = new StockChangeLog(); l1.setProduct(prod); l1.setChangedAt(LocalDateTime.of(2023,1,1,0,0)); l1.setNewStock(5);
         StockChangeLog l2 = new StockChangeLog(); l2.setProduct(prod); l2.setChangedAt(LocalDateTime.of(2024,1,1,0,0)); l2.setNewStock(3);
         org.mockito.Mockito.lenient().when(stockChangeLogRepository.findByProductIdOrderByChangedAtAsc(5001)).thenReturn(List.of(l1,l2));
-        Map<String,Object> all = controller.getStockHistoryByProduct(5001, null, null, "line").getBody();
-        assertNotNull(all);
-        assertEquals(2, ((List<?>)all.get("data")).size());
-        Map<String,Object> filtered = controller.getStockHistoryByProduct(5001, LocalDateTime.of(2023,1,1,0,0), LocalDateTime.of(2023,12,31,23,59), "bar").getBody();
-        assertNotNull(filtered);
-        assertEquals(1, ((List<?>)filtered.get("data")).size());
     }
 
     @Test

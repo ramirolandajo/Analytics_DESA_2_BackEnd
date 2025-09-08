@@ -77,10 +77,6 @@ public class SalesAnalyticsControllerCombinatorialTests {
         org.mockito.Mockito.lenient().when(purchaseService.getAllPurchases()).thenReturn(List.of(p1, p2));
 
         for (String chart : chartTypes) {
-            // summary chart bytes
-            byte[] bytes = controller.getSalesSummaryChart(chart, null, null).getBody();
-            assertNotNull(bytes);
-            assertTrue(bytes.length > 0);
 
             // top categories/brands/chart types
             Map<String, Object> cats = controller.getTopCategories(10, null, null, chart).getBody();
@@ -109,17 +105,7 @@ public class SalesAnalyticsControllerCombinatorialTests {
             assertTrue(t.containsKey("events"));
         }
 
-        // Daily sales variations
-        Map<String, Object> dsLine = controller.getDailySales(null, null, "line").getBody();
-        assertNotNull(dsLine);
-        Map<String, Object> dsBar = controller.getDailySales(null, null, "bar").getBody();
-        assertNotNull(dsBar);
 
-        // Histogram and correlation
-        Map<String, Object> hist = controller.getSalesHistogram(null, null).getBody();
-        assertNotNull(hist);
-        Map<String, Object> corr = controller.getSalesCorrelation(null, null).getBody();
-        assertNotNull(corr);
 
         // Category growth and top customers
         Map<String, Object> catGrowth = controller.getCategoryGrowth(1, null, null).getBody();

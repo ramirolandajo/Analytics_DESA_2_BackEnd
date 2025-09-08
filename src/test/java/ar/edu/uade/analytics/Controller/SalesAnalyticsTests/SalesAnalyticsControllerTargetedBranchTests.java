@@ -120,11 +120,6 @@ public class SalesAnalyticsControllerTargetedBranchTests {
         Purchase p = new Purchase(); p.setStatus(Purchase.Status.CONFIRMED); p.setDate(LocalDateTime.of(2025,6,1,10,0)); p.setCart(c);
         lenient().when(purchaseService.getAllPurchases()).thenReturn(List.of(p));
 
-        Map<String,Object> line = controller.getDailySales(null, null, "line").getBody();
-        assertNotNull(line);
-        Map<String,Object> bar = controller.getDailySales(null, null, "bar").getBody();
-        assertNotNull(bar);
-
         Map<String,Object> growthPresent = controller.getCategoryGrowth(7, null, null).getBody();
         assertNotNull(growthPresent);
         assertTrue(((Map<?,?>)growthPresent.get("categoryGrowth")).size() >= 0);

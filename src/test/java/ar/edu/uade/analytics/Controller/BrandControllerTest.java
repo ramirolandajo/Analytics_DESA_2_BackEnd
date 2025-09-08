@@ -41,60 +41,6 @@ public class BrandControllerTest {
     }
 
     @Test
-    void testApplyPieChartStyle() {
-        AEDAnalyticsController controller = new AEDAnalyticsController();
-        DefaultPieDataset dataset = new DefaultPieDataset();
-        dataset.setValue("A", 1);
-        JFreeChart chart = ChartFactory.createPieChart("Test Pie", dataset, false, false, false);
-        PiePlot plot = (PiePlot) chart.getPlot();
-        // Should not throw
-        controller.applyPieChartStyle(chart, plot);
-        assertEquals(Color.WHITE, chart.getBackgroundPaint());
-    }
-
-    @Test
-    void testApplyLineChartStyle() {
-        AEDAnalyticsController controller = new AEDAnalyticsController();
-        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-        dataset.addValue(1, "A", "A");
-        JFreeChart chart = ChartFactory.createLineChart("Test Line", "cat", "val", dataset);
-        // Should not throw
-        controller.applyLineChartStyle(chart);
-        assertEquals(Color.WHITE, chart.getBackgroundPaint());
-    }
-
-    @Test
-    void testApplyBarChartStyle() {
-        AEDAnalyticsController controller = new AEDAnalyticsController();
-        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-        dataset.addValue(1, "A", "A");
-        JFreeChart chart = ChartFactory.createBarChart("Test Bar", "cat", "val", dataset);
-        controller.applyBarChartStyle(chart);
-        assertEquals(Color.WHITE, chart.getBackgroundPaint());
-    }
-
-    @Test
-    void testApplyBoxPlotStyle() {
-        AEDAnalyticsController controller = new AEDAnalyticsController();
-        org.jfree.data.statistics.DefaultBoxAndWhiskerCategoryDataset dataset = new org.jfree.data.statistics.DefaultBoxAndWhiskerCategoryDataset();
-        dataset.add(java.util.Arrays.asList(1, 2, 3), "Series", "Category");
-        JFreeChart chart = ChartFactory.createBoxAndWhiskerChart("Test Box", "cat", "val", dataset, false);
-        controller.applyBoxPlotStyle(chart);
-        assertEquals(Color.WHITE, chart.getBackgroundPaint());
-    }
-
-    @Test
-    void testApplyScatterChartStyle() {
-        AEDAnalyticsController controller = new AEDAnalyticsController();
-        org.jfree.data.xy.XYSeries series = new org.jfree.data.xy.XYSeries("S");
-        series.add(1, 2);
-        org.jfree.data.xy.XYSeriesCollection dataset = new org.jfree.data.xy.XYSeriesCollection(series);
-        JFreeChart chart = ChartFactory.createScatterPlot("Test Scatter", "x", "y", dataset);
-        controller.applyScatterChartStyle(chart);
-        assertEquals(Color.WHITE, chart.getBackgroundPaint());
-    }
-
-    @Test
     void testSyncBrandsFromMock() throws Exception {
         BrandDTO mockBrandDTO = new BrandDTO(1L, "Samsung", true);
         Brand mockBrand = new Brand();

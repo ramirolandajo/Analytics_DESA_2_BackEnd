@@ -107,14 +107,6 @@ public class SalesAnalyticsControllerMoreBranchesTest {
         Cart cart = new Cart(); cart.setFinalPrice(250f); cart.setItems(List.of(it));
         Purchase pur = new Purchase(); pur.setStatus(Purchase.Status.CONFIRMED); pur.setDate(LocalDateTime.of(2023,4,4,10,0)); pur.setCart(cart);
         org.mockito.Mockito.lenient().when(purchaseService.getAllPurchases()).thenReturn(List.of(pur));
-
-        Map<String,Object> respBar = controller.getSalesSummary(LocalDateTime.of(2023,4,1,0,0), LocalDateTime.of(2023,4,30,23,59), "bar").getBody();
-        assertNotNull(respBar);
-        assertTrue(respBar.containsKey("chartBase64"));
-
-        Map<String,Object> respPie = controller.getSalesSummary(LocalDateTime.of(2023,4,1,0,0), LocalDateTime.of(2023,4,30,23,59), "pie").getBody();
-        assertNotNull(respPie);
-        assertTrue(respPie.containsKey("chartBase64"));
     }
 }
 

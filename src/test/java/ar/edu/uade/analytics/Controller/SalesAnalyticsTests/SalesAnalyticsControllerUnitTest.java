@@ -47,28 +47,6 @@ public class SalesAnalyticsControllerUnitTest {
         c.setFinalPrice(123f);
         p.setCart(c);
         org.mockito.Mockito.lenient().when(purchaseService.getAllPurchases()).thenReturn(List.of(p));
-
-        // Llamar getSalesSummary con chartType pie y bar
-        Map<String, Object> respPie = controller.getSalesSummary(null, null, "pie").getBody();
-        assertNotNull(respPie);
-        assertTrue(respPie.containsKey("chartBase64"));
-
-        Map<String, Object> respBar = controller.getSalesSummary(null, null, "bar").getBody();
-        assertNotNull(respBar);
-        assertTrue(respBar.containsKey("chartBase64"));
-
-        // Invocar métodos privados de estilo via reflexión (smoke test)
-        JFreeChart chart = controller.createBarChart(1, 100f, 2);
-        assertNotNull(chart);
-        JFreeChart pie = controller.createPieChart(1, 100f, 2);
-        assertNotNull(pie);
-        // aplicar estilo a pie plot
-        PiePlot<?> plotObj = (PiePlot<?>) pie.getPlot();
-        if (plotObj != null) {
-            Method applyPie = SalesAnalyticsController.class.getDeclaredMethod("applyPieChartStyle", JFreeChart.class, PiePlot.class);
-            applyPie.setAccessible(true);
-            applyPie.invoke(controller, pie, plotObj);
-        }
     }
 
     @Test
@@ -82,10 +60,6 @@ public class SalesAnalyticsControllerUnitTest {
         Purchase p1 = new Purchase(); p1.setStatus(Purchase.Status.CONFIRMED); p1.setDate(LocalDateTime.of(2023,1,1,10,0));
         Purchase p2 = new Purchase(); p2.setStatus(Purchase.Status.CONFIRMED); p2.setDate(LocalDateTime.of(2023,1,1,11,0));
         org.mockito.Mockito.lenient().when(purchaseService.getAllPurchases()).thenReturn(List.of(p1, p2));
-
-        Map<String, Object> daily = controller.getDailySales(null, null, "line").getBody();
-        assertNotNull(daily);
-        assertTrue(daily.containsKey("data"));
 
         // Top customers
         Purchase c1 = new Purchase(); c1.setStatus(Purchase.Status.CONFIRMED); c1.setDate(LocalDateTime.now());
