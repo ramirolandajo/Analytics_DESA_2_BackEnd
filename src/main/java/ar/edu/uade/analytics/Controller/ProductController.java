@@ -10,9 +10,6 @@ import ar.edu.uade.analytics.Entity.Product;
 import ar.edu.uade.analytics.Entity.Review;
 import ar.edu.uade.analytics.Entity.FavouriteProducts;
 import ar.edu.uade.analytics.Repository.ProductRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
-import jakarta.transaction.TransactionScoped;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,9 +39,6 @@ public class ProductController {
     @Autowired
     ar.edu.uade.analytics.Repository.StockChangeLogRepository stockChangeLogRepository;
 
-
-    @PersistenceContext
-    EntityManager entityManager;
 
     // Sincroniza productos desde el mock
     @Transactional(timeout = 60)
@@ -672,4 +666,19 @@ public class ProductController {
         }
         return ResponseEntity.ok("Cambios de stock procesados correctamente: " + procesados);
     }
+
+
+    // Endpoint para obtener todos los productos, categorías y marcas juntos
+        @GetMapping("/all-data")
+        public ResponseEntity<java.util.Map<String, Object>> getAllProductsCategoriesBrands() {
+            java.util.Map<String, Object> result = new java.util.HashMap<>();
+            result.put("products", productRepository.findAll().stream().map(this::toDTO).collect(Collectors.toList()));
+            result.put("categories", categoryRepository.findAll().stream()
+                    .map(cat -> new CategoryDTO(Long.valueOf(cat.getId()), cat.getName(), cat.isActive()))
+                    .collect(Collectors.toList()));
+            result.put("brands", brandRepository.findAll().stream()
+                    .map(brand -> new BrandDTO(Long.valueOf(brand.getId()), brand.getName(), brand.isActive()))
+                    .collect(Collectors.toList()));
+            return ResponseEntity.ok(result);
+        }
 }
