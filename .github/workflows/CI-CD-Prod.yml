@@ -1,8 +1,8 @@
-name: Build & Deploy Backend (Develop)
+name: Build & Deploy Backend (Production)
 
 on:
   push:
-    branches: [ develop ]
+    branches: [ main ]
   workflow_dispatch:
 
 # Handles multiple workflows running at the same time (queues them)
