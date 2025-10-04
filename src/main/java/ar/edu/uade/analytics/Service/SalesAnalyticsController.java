@@ -1,14 +1,9 @@
-package ar.edu.uade.analytics.Controller;
+package ar.edu.uade.analytics.Service;
 
 import ar.edu.uade.analytics.Entity.Purchase;
 import ar.edu.uade.analytics.Service.PurchaseService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -19,8 +14,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-@RestController
-@RequestMapping("/analytics/sales")
 public class SalesAnalyticsController {
 
     @Autowired
@@ -29,10 +22,9 @@ public class SalesAnalyticsController {
     @Autowired
     private ar.edu.uade.analytics.Repository.StockChangeLogRepository stockChangeLogRepository;
 
-    @GetMapping("/summary")
-    public ResponseEntity<Map<String, Object>> getSalesSummary(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getSalesSummary(
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         if (endDate == null) endDate = LocalDateTime.now();
         if (startDate == null) startDate = endDate.minusDays(29); // default 30 días
@@ -64,13 +56,12 @@ public class SalesAnalyticsController {
         resumen.put("facturacionTotalEnMiles", facturacionTotalEnMiles);
         resumen.put("facturacionTotalFormateado", String.format("$%,.2f", facturacionTotal));
         resumen.put("chartBase64", null);
-        return ResponseEntity.ok(resumen);
+        return resumen;
     }
 
-    @GetMapping("/trend")
-    public ResponseEntity<Map<String, Object>> getTrend(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getTrend(
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         if (endDate == null) endDate = LocalDateTime.now();
         if (startDate == null) startDate = endDate.minusDays(29);
         long days = ChronoUnit.DAYS.between(startDate.toLocalDate(), endDate.toLocalDate()) + 1;
@@ -114,7 +105,7 @@ public class SalesAnalyticsController {
                 "prevStart", prevStart.toString(),
                 "prevEnd", prevEnd.toString()
         ));
-        return ResponseEntity.ok(response);
+        return response;
     }
 
     private Map<String, Object> baseTrendRow(String date) {
@@ -137,11 +128,10 @@ public class SalesAnalyticsController {
         }
     }
 
-    @GetMapping("/top-products")
-    public ResponseEntity<Map<String, Object>> getTopProducts(
-            @RequestParam(defaultValue = "10") int limit,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getTopProducts(
+            int limit,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         Map<Integer, Integer> productSales = new HashMap<>(); // productId -> cantidad vendida
         for (Purchase purchase : purchases) {
@@ -177,15 +167,14 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", result);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/top-categories")
-    public ResponseEntity<Map<String, Object>> getTopCategories(
-            @RequestParam(defaultValue = "10") int limit,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @RequestParam(defaultValue = "bar") String ignoredChartType) {
+    public Map<String, Object> getTopCategories(
+            int limit,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            String ignoredChartType) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         Map<String, Integer> categorySales = new HashMap<>(); // nombreCategoria -> cantidad vendida
         for (Purchase purchase : purchases) {
@@ -222,22 +211,20 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", result);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/summary/chart")
     public ResponseEntity<byte[]> getSalesSummaryChart(
     ) {
         // No chart generation in the service layer
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/top-brands")
-    public ResponseEntity<Map<String, Object>> getTopBrands(
-            @RequestParam(defaultValue = "10") int limit,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @RequestParam(defaultValue = "bar") String ignoredChartType) {
+    public Map<String, Object> getTopBrands(
+            int limit,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            String ignoredChartType) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         Map<String, Integer> brandSales = new HashMap<>();
         for (Purchase purchase : purchases) {
@@ -271,14 +258,13 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", result);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
     //Ventas diarias agrupadas por fecha 5→ Gráfico de líneas (Line Chart) para mostrar la evolución temporal.
-    @GetMapping("/daily-sales")
-    public ResponseEntity<Map<String, Object>> getDailySales(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getDailySales(
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
 
         // Mapas por día
@@ -332,14 +318,13 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", result);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/stock-history")
-    public ResponseEntity<Map<String, Object>> getStockHistoryByProduct(
-            @RequestParam("productId") Integer productId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getStockHistoryByProduct(
+            Integer productId,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         // Obtener historial de cambios de stock para el producto
         List<ar.edu.uade.analytics.Entity.StockChangeLog> logs =
                 stockChangeLogRepository.findByProductIdOrderByChangedAtAsc(productId);
@@ -359,13 +344,12 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", result);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/low-stock")
-    public ResponseEntity<Map<String, Object>> getLowStockProducts(
-            @RequestParam(defaultValue = "10") int threshold,
-            @RequestParam(defaultValue = "10") int limit) {
+    public Map<String, Object> getLowStockProducts(
+            int threshold,
+            int limit) {
         List<ar.edu.uade.analytics.Entity.Product> products = purchaseService.getProductRepository().findAll();
         // Filtrar productos con stock menor o igual al threshold
         List<ar.edu.uade.analytics.Entity.Product> lowStock = products.stream()
@@ -384,19 +368,18 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", result);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/stock-history-by-product-code")
-    public ResponseEntity<Map<String, Object>> getStockHistoryByProductCode(
-            @RequestParam("productCode") Integer productCode,
-            @RequestParam(required = false, defaultValue = "false") boolean showProfit,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getStockHistoryByProductCode(
+            Integer productCode,
+            boolean showProfit,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         // Buscar el producto por productCode
         ar.edu.uade.analytics.Entity.Product product = purchaseService.getProductRepository().findByProductCode(productCode);
         if (product == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Producto no encontrado"));
+            return Map.of("error", "Producto no encontrado");
         }
         // Obtener historial de cambios de stock para el producto
         List<ar.edu.uade.analytics.Entity.StockChangeLog> logs = stockChangeLogRepository.findByProductIdOrderByChangedAtAsc(product.getId());
@@ -426,15 +409,14 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", result);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/products-dashboard")
-    public ResponseEntity<Map<String, Object>> getProductsDashboard(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @RequestParam(required = false) Integer categoryId,
-            @RequestParam(required = false) Integer brandId) {
+    public Map<String, Object> getProductsDashboard(
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            Integer categoryId,
+            Integer brandId) {
         List<ar.edu.uade.analytics.Entity.Product> products = purchaseService.getProductRepository().findAll();
         // Filtrar por categoría y marca si corresponde
         if (categoryId != null) {
@@ -482,14 +464,13 @@ public class SalesAnalyticsController {
         response.put("topProductIds", topProductIds);
         response.put("stockChartBase64", stockChartBase64);
         response.put("evolutionChartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/top-customers")
-    public ResponseEntity<Map<String, Object>> getTopCustomers(
-            @RequestParam(defaultValue = "10") int limit,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getTopCustomers(
+            int limit,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         // Filtrar por fechas si corresponde
         if (startDate != null || endDate != null) {
@@ -525,13 +506,12 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("data", sorted);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/histogram")
-    public ResponseEntity<Map<String, Object>> getSalesHistogram(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getSalesHistogram(
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         if (startDate != null || endDate != null) {
             purchases = purchases.stream().filter(p -> {
@@ -571,13 +551,12 @@ public class SalesAnalyticsController {
         response.put("histogram", histogram);
         response.put("chartBase64", null);
         response.put("productTrends", productTrends);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/correlation")
-    public ResponseEntity<Map<String, Object>> getSalesCorrelation(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getSalesCorrelation(
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         if (startDate != null || endDate != null) {
             purchases = purchases.stream().filter(p -> {
@@ -609,14 +588,13 @@ public class SalesAnalyticsController {
         Map<String, Object> response = new HashMap<>();
         response.put("chartBase64", null);
         response.put("regression", regression);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/category-growth")
-    public ResponseEntity<Map<String, Object>> getCategoryGrowth(
-            @RequestParam Integer categoryId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+    public Map<String, Object> getCategoryGrowth(
+            Integer categoryId,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
         if (startDate != null || endDate != null) {
             purchases = purchases.stream().filter(p -> {
@@ -653,15 +631,14 @@ public class SalesAnalyticsController {
         response.put("categoryName", categoryName);
         response.put("categoryGrowth", dateSales);
         response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
-    @GetMapping("/product-events-timeline")
-    public ResponseEntity<Map<String, Object>> getProductEventsTimeline(
-            @RequestParam(required = false) Integer productId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @RequestParam(required = false, defaultValue = "5") int topN) {
+    public Map<String, Object> getProductEventsTimeline(
+            Integer productId,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            int topN) {
         // Limitar topN entre 1 y 10
         if (topN < 1) topN = 1;
         if (topN > 10) topN = 10;
@@ -689,7 +666,7 @@ public class SalesAnalyticsController {
                 Map<String, Object> response = new HashMap<>();
                 response.put("events", new ArrayList<>());
                 response.put("chartBase64", null);
-                return ResponseEntity.ok(response);
+                return response;
             }
             // 3. Contar eventos por producto SOLO en el rango
             Map<Integer, Integer> productEventCount = new HashMap<>();
@@ -710,7 +687,7 @@ public class SalesAnalyticsController {
         }
         // Delegar al helper que arma eventos, dataset y gráfico a partir de los logs filtrados
         Map<String, Object> response = buildTimelineFromLogs(logs);
-        return ResponseEntity.ok(response);
+        return response;
     }
 
     // Package-private helper: arma la respuesta (events + chartBase64) a partir de logs ya filtrados por fecha/producto
@@ -922,10 +899,9 @@ public class SalesAnalyticsController {
         return result;
     }
 
-    @GetMapping("/at-risk-customers")
     public ResponseEntity<Map<String,Object>> getAtRiskCustomers(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         if (endDate == null) endDate = LocalDateTime.now();
         if (startDate == null) startDate = endDate.minusDays(29);
         long days = ChronoUnit.DAYS.between(startDate.toLocalDate(), endDate.toLocalDate()) + 1;
@@ -966,12 +942,11 @@ public class SalesAnalyticsController {
         return ResponseEntity.ok(resp);
     }
 
-    @GetMapping("/slow-movers")
     public ResponseEntity<Map<String,Object>> getSlowMovers(
-            @RequestParam(defaultValue = "20") int minStock,
-            @RequestParam(defaultValue = "5") int maxSales,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+            int minStock,
+            int maxSales,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         if (endDate == null) endDate = LocalDateTime.now();
         if (startDate == null) startDate = endDate.minusDays(29);
         List<Purchase> purchases = purchaseService.getAllPurchases();
@@ -1012,12 +987,11 @@ public class SalesAnalyticsController {
         return ResponseEntity.ok(resp);
     }
 
-    @GetMapping("/fast-movers")
     public ResponseEntity<Map<String,Object>> getFastMovers(
-            @RequestParam(defaultValue = "30") double growthPct,
-            @RequestParam(defaultValue = "10") int stockThreshold,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+            double growthPct,
+            int stockThreshold,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
         if (endDate == null) endDate = LocalDateTime.now();
         if (startDate == null) startDate = endDate.minusDays(29);
         long days = ChronoUnit.DAYS.between(startDate.toLocalDate(), endDate.toLocalDate()) + 1;

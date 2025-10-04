@@ -11,11 +11,14 @@ import java.util.List;
 public class Brand {
 
     @Id
-    @GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
     @Column
     private String name;
+
+    @Column(unique = true)
+    private Integer brandCode;
 
     @Column(nullable = false)
     private boolean active;

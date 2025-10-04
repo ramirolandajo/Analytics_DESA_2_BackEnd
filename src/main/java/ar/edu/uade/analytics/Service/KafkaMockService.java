@@ -1,15 +1,11 @@
-package ar.edu.uade.analytics.Communication;
+package ar.edu.uade.analytics.Service;
 
 import ar.edu.uade.analytics.DTO.BrandDTO;
 import ar.edu.uade.analytics.DTO.CategoryDTO;
 import ar.edu.uade.analytics.DTO.ProductDTO;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-@ConditionalOnProperty(value = "analytics.mock.enabled", havingValue = "true", matchIfMissing = true)
-@Service
 public class KafkaMockService {
 
 
