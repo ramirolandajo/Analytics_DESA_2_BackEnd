@@ -5,11 +5,6 @@ spring:
   #   driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.h2.Driver}
   #   username: ${SPRING_DATASOURCE_USERNAME:sa}
   #   password: ${SPRING_DATASOURCE_PASSWORD:}
-  datasource:
-    url: jdbc:aws-wrapper:mysql://d2-develop.ct6ouwkcg80y.sa-east-1.rds.amazonaws.com:3306/analytics_dev
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    username: admin
-    password: Desarrollo2%
   jpa:
     hibernate:
       ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
