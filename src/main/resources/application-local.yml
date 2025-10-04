@@ -13,9 +13,10 @@ spring:
       hibernate:
         format_sql: ${SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL:false}
   datasource:
-    url: jdbc:mysql://${DB_URL}/${DB_SCHEMA}
-    username: ${DB_USR}
-    password: ${DB_PASSWORD}
+        url: jdbc:aws-wrapper:mysql://d2-develop.ct6ouwkcg80y.sa-east-1.rds.amazonaws.com:3306/analytics_dev
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        username: admin
+        password: Desarrollo2%
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
     consumer:
