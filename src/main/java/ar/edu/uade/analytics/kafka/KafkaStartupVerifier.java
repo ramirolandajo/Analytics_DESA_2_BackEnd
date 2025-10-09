@@ -9,6 +9,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.stereotype.Component;
@@ -23,19 +24,20 @@ import java.util.concurrent.TimeUnit;
  * Si conecta, arranca los listeners manualmente (auto-startup está en false).
  */
 @ConditionalOnProperty(value = "analytics.kafka.enabled", havingValue = "true")
+@ConditionalOnClass(KafkaListenerEndpointRegistry.class)
 @Component
 public class KafkaStartupVerifier implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaStartupVerifier.class);
 
-    private final KafkaListenerEndpointRegistry listenerRegistry;
+    private final ObjectProvider<KafkaListenerEndpointRegistry> listenerRegistryProvider;
     private final String bootstrapServers;
 
     public KafkaStartupVerifier(
             ObjectProvider<KafkaListenerEndpointRegistry> listenerRegistryProvider,
             @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String bootstrapServers
     ) {
-        this.listenerRegistry = listenerRegistryProvider.getIfAvailable();
+        this.listenerRegistryProvider = listenerRegistryProvider;
         this.bootstrapServers = bootstrapServers;
     }
 
@@ -50,6 +52,7 @@ public class KafkaStartupVerifier implements ApplicationRunner {
             if (pingKafka(opTimeout)) {
                 log.info("Kafka accesible en {}. Arrancando listeners.", bootstrapServers);
                 // Iniciar todos los listeners registrados
+                KafkaListenerEndpointRegistry listenerRegistry = listenerRegistryProvider.getIfAvailable();
                 if (listenerRegistry != null) {
                     listenerRegistry.start();
                 } else {
