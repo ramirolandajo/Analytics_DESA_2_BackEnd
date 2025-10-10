@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,6 +31,17 @@ public class SalesAnalyticsController {
     @Autowired
     private ar.edu.uade.analytics.Repository.StockChangeLogRepository stockChangeLogRepository;
 
+    // Nuevo: usar carts/cart_items como fuente alternativa
+    @Autowired
+    private ar.edu.uade.analytics.Repository.CartRepository cartRepository;
+
+    // Nuevo: usar eventos consumidos como respaldo para series temporales
+    @Autowired
+    private ar.edu.uade.analytics.Repository.ConsumedEventLogRepository consumedEventLogRepository;
+
+    @Autowired
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getSalesSummary(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
@@ -43,18 +56,32 @@ public class SalesAnalyticsController {
         for (Purchase purchase : purchases) {
             if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
                 LocalDateTime fecha = purchase.getDate();
+                if (fecha == null) continue; // evitar NPE
                 if (!fecha.isBefore(startDate) && !fecha.isAfter(endDate)) {
                     totalVentas++;
                     if (purchase.getUser() != null) clientesActivos.add(purchase.getUser().getId());
                     if (purchase.getCart() != null) {
                         facturacionTotal += purchase.getCart().getFinalPrice() != null ? purchase.getCart().getFinalPrice() : 0f;
                         if (purchase.getCart().getItems() != null) {
-                            productosVendidos += purchase.getCart().getItems().stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
+                            productosVendidos += purchase.getCart().getItems().stream().mapToInt(i -> i != null && i.getQuantity() != null ? i.getQuantity() : 0).sum();
                         }
                     }
                 }
             }
         }
+
+        // Fallback: si no hay ventas confirmadas desde purchases, intentar desde carts/cart_items (sin filtro temporal por falta de fecha en Cart)
+        if ((purchases == null || purchases.isEmpty()) || totalVentas == 0) {
+            Map<String, Object> resumenDesdeCarts = computeSummaryFromCarts();
+            // formateo final compatible
+            float total = ((Number) resumenDesdeCarts.getOrDefault("facturacionTotal", 0f)).floatValue();
+            float facturacionTotalEnMiles = Math.round((total / 1000f) * 100f) / 100f;
+            resumenDesdeCarts.put("facturacionTotalEnMiles", facturacionTotalEnMiles);
+            resumenDesdeCarts.put("facturacionTotalFormateado", String.format("$%,.2f", total));
+            resumenDesdeCarts.putIfAbsent("chartBase64", null);
+            return ResponseEntity.ok(resumenDesdeCarts);
+        }
+
         Map<String, Object> resumen = new HashMap<>();
         resumen.put("totalVentas", totalVentas);
         resumen.put("facturacionTotal", facturacionTotal);
@@ -93,6 +120,7 @@ public class SalesAnalyticsController {
         for (Purchase purchase : purchases) {
             if (purchase.getStatus() != Purchase.Status.CONFIRMED) continue;
             LocalDateTime fecha = purchase.getDate();
+            if (fecha == null) continue; // evitar NPE
             String day = fecha.toLocalDate().toString();
             boolean isCurrent = !fecha.isBefore(startDate) && !fecha.isAfter(endDate);
             boolean isPrevious = !fecha.isBefore(prevStart) && !fecha.isAfter(prevEnd);
@@ -147,17 +175,35 @@ public class SalesAnalyticsController {
         for (Purchase purchase : purchases) {
             if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
                 LocalDateTime fecha = purchase.getDate();
+                if (fecha == null) continue; // evitar NPE
                 if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
                     if (purchase.getCart() != null && purchase.getCart().getItems() != null) {
                         for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
+                            if (item == null || item.getProduct() == null) continue;
                             Integer productId = item.getProduct().getId();
                             Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
+                            if (productId == null) continue;
                             productSales.put(productId, productSales.getOrDefault(productId, 0) + cantidad);
                         }
                     }
                 }
             }
         }
+
+        // Fallback: si no hay ventas desde purchases, sumar desde carts/cart_items
+        if (productSales.isEmpty()) {
+            List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
+            for (ar.edu.uade.analytics.Entity.Cart c : carts) {
+                if (c.getItems() == null) continue;
+                for (ar.edu.uade.analytics.Entity.CartItem item : c.getItems()) {
+                    if (item == null || item.getProduct() == null) continue;
+                    Integer productId = item.getProduct().getId();
+                    Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
+                    productSales.put(productId, productSales.getOrDefault(productId, 0) + cantidad);
+                }
+            }
+        }
+
         // Ordenar por cantidad vendida y limitar
         List<Map.Entry<Integer, Integer>> sorted = productSales.entrySet().stream()
                 .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
@@ -168,9 +214,12 @@ public class SalesAnalyticsController {
             Map<String, Object> prodInfo = new HashMap<>();
             prodInfo.put("productId", entry.getKey());
             prodInfo.put("cantidadVendida", entry.getValue());
-            // Agregar el nombre del producto
-            ar.edu.uade.analytics.Entity.Product prod = purchaseService.getProductRepository().findById(entry.getKey()).orElse(null);
-            String title = (prod != null && prod.getTitle() != null) ? prod.getTitle() : "ID " + entry.getKey();
+            ar.edu.uade.analytics.Entity.Product prod = null;
+            ar.edu.uade.analytics.Repository.ProductRepository pr = purchaseService.getProductRepository();
+            if (pr != null) {
+                prod = pr.findById(entry.getKey()).orElse(null);
+            }
+            String title = (prod != null && prod.getTitle() != null) ? prod.getTitle() : ("ID " + entry.getKey());
             prodInfo.put("title", title);
             result.add(prodInfo);
         }
@@ -191,22 +240,49 @@ public class SalesAnalyticsController {
         for (Purchase purchase : purchases) {
             if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
                 LocalDateTime fecha = purchase.getDate();
+                if (fecha == null) continue; // evitar NPE
                 if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
                     if (purchase.getCart() != null && purchase.getCart().getItems() != null) {
                         for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
-                            ar.edu.uade.analytics.Entity.Product product = item.getProduct();
-                            if (product != null && product.getCategories() != null) {
+                            ar.edu.uade.analytics.Entity.Product product = item != null ? item.getProduct() : null;
+                            Integer cantidad = (item != null && item.getQuantity() != null) ? item.getQuantity() : 0;
+                            if (product != null && product.getCategories() != null && !product.getCategories().isEmpty()) {
                                 for (ar.edu.uade.analytics.Entity.Category category : product.getCategories()) {
-                                    String catName = category.getName();
-                                    Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
+                                    String catName = category != null ? category.getName() : null;
+                                    if (catName == null) catName = "Otros";
                                     categorySales.put(catName, categorySales.getOrDefault(catName, 0) + cantidad);
                                 }
+                            } else {
+                                // Sin categorías: sumar en "Otros" para no quedar vacío
+                                categorySales.put("Otros", categorySales.getOrDefault("Otros", 0) + cantidad);
                             }
                         }
                     }
                 }
             }
         }
+
+        // Fallback: si no hay datos desde purchases, sumar desde carts/cart_items
+        if (categorySales.isEmpty()) {
+            List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
+            for (ar.edu.uade.analytics.Entity.Cart c : carts) {
+                if (c.getItems() == null) continue;
+                for (ar.edu.uade.analytics.Entity.CartItem item : c.getItems()) {
+                    if (item == null) continue;
+                    ar.edu.uade.analytics.Entity.Product product = item.getProduct();
+                    Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
+                    if (product != null && product.getCategories() != null && !product.getCategories().isEmpty()) {
+                        for (ar.edu.uade.analytics.Entity.Category category : product.getCategories()) {
+                            String catName = category.getName();
+                            categorySales.put(catName, categorySales.getOrDefault(catName, 0) + cantidad);
+                        }
+                    } else {
+                        categorySales.put("Otros", categorySales.getOrDefault("Otros", 0) + cantidad);
+                    }
+                }
+            }
+        }
+
         // Ordenar por cantidad vendida y limitar
         List<Map.Entry<String, Integer>> sorted = categorySales.entrySet().stream()
                 .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
@@ -243,17 +319,32 @@ public class SalesAnalyticsController {
         for (Purchase purchase : purchases) {
             if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
                 LocalDateTime fecha = purchase.getDate();
+                if (fecha == null) continue; // evitar NPE
                 if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
                     if (purchase.getCart() != null && purchase.getCart().getItems() != null) {
                         for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
                             ar.edu.uade.analytics.Entity.Product product = item.getProduct();
-                            if (product != null && product.getBrand() != null && product.getBrand().getName() != null) {
-                                String brandName = product.getBrand().getName();
-                                Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
-                                brandSales.put(brandName, brandSales.getOrDefault(brandName, 0) + cantidad);
-                            }
+                            String brandName = (product != null && product.getBrand() != null && product.getBrand().getName() != null)
+                                    ? product.getBrand().getName() : "Otros";
+                            Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
+                            brandSales.put(brandName, brandSales.getOrDefault(brandName, 0) + cantidad);
                         }
                     }
+                }
+            }
+        }
+        // Fallback: usar carts/cart_items
+        if (brandSales.isEmpty()) {
+            List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
+            for (ar.edu.uade.analytics.Entity.Cart c : carts) {
+                if (c.getItems() == null) continue;
+                for (ar.edu.uade.analytics.Entity.CartItem item : c.getItems()) {
+                    if (item == null) continue;
+                    ar.edu.uade.analytics.Entity.Product product = item.getProduct();
+                    String brandName = (product != null && product.getBrand() != null && product.getBrand().getName() != null)
+                            ? product.getBrand().getName() : "Otros";
+                    Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
+                    brandSales.put(brandName, brandSales.getOrDefault(brandName, 0) + cantidad);
                 }
             }
         }
@@ -274,32 +365,27 @@ public class SalesAnalyticsController {
         return ResponseEntity.ok(response);
     }
 
-    //Ventas diarias agrupadas por fecha 5→ Gráfico de líneas (Line Chart) para mostrar la evolución temporal.
+    //Ventas diarias agrupadas por fecha
     @GetMapping("/daily-sales")
     public ResponseEntity<Map<String, Object>> getDailySales(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
         List<Purchase> purchases = purchaseService.getAllPurchases();
-
-        // Mapas por día
-        Map<String, Integer> dailyTransactions = new HashMap<>();     // # de compras confirmadas (transacciones)
-        Map<String, Float>   dailyRevenue      = new HashMap<>();     // facturación total del día
-        Map<String, Integer> dailyUnits        = new HashMap<>();     // unidades (suma de quantities)
-
+        Map<String, Integer> dailyTransactions = new HashMap<>();
+        Map<String, Float>   dailyRevenue      = new HashMap<>();
+        Map<String, Integer> dailyUnits        = new HashMap<>();
         for (Purchase purchase : purchases) {
             if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
                 LocalDateTime fecha = purchase.getDate();
+                if (fecha == null) continue; // evitar NPE
                 if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
                     String day = fecha.toLocalDate().toString();
-                    // Transacciones
                     dailyTransactions.put(day, dailyTransactions.getOrDefault(day, 0) + 1);
-                    // Facturación
                     float price = 0f;
                     if (purchase.getCart() != null && purchase.getCart().getFinalPrice() != null) {
                         price = purchase.getCart().getFinalPrice();
                     }
                     dailyRevenue.put(day, dailyRevenue.getOrDefault(day, 0f) + price);
-                    // Unidades
                     int units = 0;
                     if (purchase.getCart() != null && purchase.getCart().getItems() != null) {
                         for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
@@ -312,6 +398,66 @@ public class SalesAnalyticsController {
                 }
             }
         }
+
+        // Fallback: si no hay datos, intentar construir a partir de eventos "Compra confirmada"
+        if (dailyTransactions.isEmpty()) {
+            OffsetDateTime start = startDate != null ? startDate.atOffset(ZoneOffset.UTC) : null;
+            OffsetDateTime end = endDate != null ? endDate.atOffset(ZoneOffset.UTC) : null;
+            List<ar.edu.uade.analytics.Entity.ConsumedEventLog> logs;
+            if (start != null && end != null) {
+                logs = consumedEventLogRepository.findByStatusAndEventTypeContainingIgnoreCaseAndProcessedAtBetweenOrderByProcessedAtAsc(
+                        ar.edu.uade.analytics.Entity.ConsumedEventLog.Status.PROCESSED,
+                        "Compra confirmada",
+                        start,
+                        end
+                );
+            } else {
+                logs = consumedEventLogRepository.findByStatusAndEventTypeContainingIgnoreCaseOrderByProcessedAtAsc(
+                        ar.edu.uade.analytics.Entity.ConsumedEventLog.Status.PROCESSED,
+                        "Compra confirmada"
+                );
+            }
+            for (ar.edu.uade.analytics.Entity.ConsumedEventLog log : logs) {
+                String day = null;
+                float price = 0f;
+                int units = 0;
+                try {
+                    java.util.Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), java.util.Map.class);
+                    // timestamp del evento si existe
+                    Object ts = root.get("timestamp");
+                    if (ts instanceof Number) {
+                        long seconds = ((Number) ts).longValue();
+                        day = java.time.Instant.ofEpochSecond(seconds).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString();
+                    }
+                    Object payload = root.get("payload");
+                    if (payload instanceof Map<?,?> payloadMap) {
+                        Object cart = payloadMap.get("cart");
+                        if (cart instanceof Map<?,?> cartMap) {
+                            Object fp = cartMap.get("finalPrice");
+                            if (fp instanceof Number) price = ((Number) fp).floatValue();
+                            Object items = cartMap.get("items");
+                            if (items instanceof List<?> list) {
+                                for (Object o : list) {
+                                    if (o instanceof Map<?,?> m) {
+                                        Object q = m.get("quantity");
+                                        if (q instanceof Number) units += ((Number) q).intValue();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) { }
+                if (day == null && log.getProcessedAt() != null) {
+                    day = log.getProcessedAt().atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDate().toString();
+                }
+                if (day != null) {
+                    dailyTransactions.put(day, dailyTransactions.getOrDefault(day, 0) + 1);
+                    dailyRevenue.put(day, dailyRevenue.getOrDefault(day, 0f) + price);
+                    dailyUnits.put(day, dailyUnits.getOrDefault(day, 0) + units);
+                }
+            }
+        }
+
         // Ordenar por fecha
         List<String> sortedDates = new ArrayList<>(dailyTransactions.keySet());
         java.util.Collections.sort(sortedDates);
@@ -321,12 +467,11 @@ public class SalesAnalyticsController {
             Integer trans = dailyTransactions.getOrDefault(date, 0);
             Float revenue = dailyRevenue.getOrDefault(date, 0f);
             Integer units = dailyUnits.getOrDefault(date, 0);
-            // Campos esperados por el frontend simplificado de correlación
             info.put("date", date);
-            info.put("ventas", trans);          // alias para cantidad de transacciones
-            info.put("cantidadVentas", trans);  // compatibilidad con código previo
-            info.put("facturacion", revenue);   // total ARS
-            info.put("unidades", units);        // suma de ítems (si se necesitara en otros gráficos)
+            info.put("ventas", trans);
+            info.put("cantidadVentas", trans);
+            info.put("facturacion", revenue);
+            info.put("unidades", units);
             result.add(info);
         }
         Map<String, Object> response = new HashMap<>();
@@ -366,7 +511,14 @@ public class SalesAnalyticsController {
     public ResponseEntity<Map<String, Object>> getLowStockProducts(
             @RequestParam(defaultValue = "10") int threshold,
             @RequestParam(defaultValue = "10") int limit) {
-        List<ar.edu.uade.analytics.Entity.Product> products = purchaseService.getProductRepository().findAll();
+        ar.edu.uade.analytics.Repository.ProductRepository pr = purchaseService.getProductRepository();
+        if (pr == null) {
+            Map<String, Object> body = new HashMap<>();
+            body.put("data", java.util.Collections.emptyList());
+            body.put("chartBase64", null);
+            return ResponseEntity.ok(body);
+        }
+        List<ar.edu.uade.analytics.Entity.Product> products = pr.findAll();
         // Filtrar productos con stock menor o igual al threshold
         List<ar.edu.uade.analytics.Entity.Product> lowStock = products.stream()
                 .filter(p -> p.getStock() != null && p.getStock() <= threshold)
@@ -416,10 +568,10 @@ public class SalesAnalyticsController {
                 if (showProfit && "Venta".equalsIgnoreCase(log.getReason())) {
                     Float price = product.getPrice() != null ? product.getPrice() : 0f;
                     profit = price * log.getQuantityChanged();
-                    profitAccum += profit;
-                    info.put("profit", profit);
-                    info.put("profitAccum", profitAccum);
                 }
+                profitAccum += profit;
+                info.put("profit", profit);
+                info.put("profitAccumulated", profitAccum);
                 result.add(info);
             }
         }
@@ -429,638 +581,333 @@ public class SalesAnalyticsController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/products-dashboard")
-    public ResponseEntity<Map<String, Object>> getProductsDashboard(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @RequestParam(required = false) Integer categoryId,
-            @RequestParam(required = false) Integer brandId) {
-        List<ar.edu.uade.analytics.Entity.Product> products = purchaseService.getProductRepository().findAll();
-        // Filtrar por categoría y marca si corresponde
-        if (categoryId != null) {
-            products = products.stream().filter(p -> p.getCategories() != null && p.getCategories().stream().anyMatch(c -> c.getId().equals(categoryId))).toList();
-        }
-        if (brandId != null) {
-            products = products.stream().filter(p -> p.getBrand() != null && p.getBrand().getId().equals(brandId)).toList();
-        }
-        // Estadísticas generales
-        int totalProductos = products.size();
-        int stockTotal = products.stream().mapToInt(p -> p.getStock() != null ? p.getStock() : 0).sum();
-        List<Map<String, Object>> productosCriticos = products.stream()
-                .filter(p -> p.getStock() != null && p.getStock() <= 10)
-                .map(p -> {
-                    Map<String, Object> map = new HashMap<>();
-                    map.put("productId", p.getId());
-                    map.put("title", p.getTitle());
-                    map.put("stock", p.getStock());
-                    return map;
-                })
-                .toList();
-        // Gráfica de stock actual
-        String stockChartBase64 = null;
-        // Gráfica de evolución de stock de los productos más vendidos
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        if (startDate != null || endDate != null) {
-            purchases = purchases.stream().filter(p -> {
-                LocalDateTime fecha = p.getDate();
-                return (startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate));
-            }).toList();
-        }
-        // Reuse helper to compute product sales applying same filters
-        Map<Integer, Integer> productSales = computeProductSalesFromPurchases(purchases, startDate, endDate, categoryId, brandId);
-        // Tomar los 5 productos más vendidos
-        List<Integer> topProductIds = productSales.entrySet().stream()
-                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                .limit(5)
-                .map(Map.Entry::getKey)
-                .toList();
-        // No charts generated: evolution chart omitted
-        Map<String, Object> response = new HashMap<>();
-        response.put("totalProductos", totalProductos);
-        response.put("stockTotal", stockTotal);
-        response.put("productosCriticos", productosCriticos);
-        response.put("topProductIds", topProductIds);
-        response.put("stockChartBase64", stockChartBase64);
-        response.put("evolutionChartBase64", null);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/top-customers")
-    public ResponseEntity<Map<String, Object>> getTopCustomers(
-            @RequestParam(defaultValue = "10") int limit,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        // Filtrar por fechas si corresponde
-        if (startDate != null || endDate != null) {
-            purchases = purchases.stream().filter(p -> {
-                LocalDateTime fecha = p.getDate();
-                return (startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate));
-            }).toList();
-        }
-        // Agrupar por usuario
-        Map<Integer, Map<String, Object>> userStats = new HashMap<>();
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED && purchase.getUser() != null) {
-                ar.edu.uade.analytics.Entity.User user = purchase.getUser();
-                Integer userId = user.getId();
-                String name = user.getName();
-                String email = user.getEmail();
-                float gasto = purchase.getCart() != null && purchase.getCart().getFinalPrice() != null ? purchase.getCart().getFinalPrice() : 0f;
-                Map<String, Object> stats = userStats.getOrDefault(userId, new HashMap<>());
-                stats.put("userId", userId);
-                stats.put("name", name);
-                stats.put("email", email);
-                stats.put("gastoTotal", ((Number) stats.getOrDefault("gastoTotal", 0f)).floatValue() + gasto);
-                stats.put("cantidadCompras", ((Number) stats.getOrDefault("cantidadCompras", 0)).intValue() + 1);
-                userStats.put(userId, stats);
-            }
-        }
-        // Ordenar por gasto total y limitar
-        List<Map<String, Object>> sorted = userStats.values().stream()
-                .sorted((a, b) -> Float.compare(((Number) b.get("gastoTotal")).floatValue(), ((Number) a.get("gastoTotal")).floatValue()))
-                .limit(limit)
-                .toList();
-        // No chart generation: return only metrics
-        Map<String, Object> response = new HashMap<>();
-        response.put("data", sorted);
-        response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/histogram")
-    public ResponseEntity<Map<String, Object>> getSalesHistogram(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        if (startDate != null || endDate != null) {
-            purchases = purchases.stream().filter(p -> {
-                LocalDateTime fecha = p.getDate();
-                return (startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate));
-            }).toList();
-        }
-        // ETL: Agrupar compras por usuario y contar frecuencia
-        Map<Integer, Integer> userPurchaseCount = new HashMap<>();
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED && purchase.getUser() != null) {
-                Integer userId = purchase.getUser().getId();
-                userPurchaseCount.put(userId, userPurchaseCount.getOrDefault(userId, 0) + 1);
-            }
-        }
-        // Histograma: frecuencia de compras por usuario
-        Map<String, Integer> histogram = new HashMap<>();
-        for (Integer count : userPurchaseCount.values()) {
-            String rango = count <= 2 ? "1-2" : count <= 5 ? "3-5" : "6+";
-            histogram.put(rango, histogram.getOrDefault(rango, 0) + 1);
-        }
-        // ML: Predicción de ventas por producto (regresión lineal simple)
-        Map<Integer, List<Integer>> productSalesByDay = new HashMap<>(); // productId -> ventas por día
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED && purchase.getCart() != null && purchase.getCart().getItems() != null) {
-                for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
-                    Integer productId = item.getProduct().getId();
-                    Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
-                    productSalesByDay.computeIfAbsent(productId, k -> new ArrayList<>()).add(cantidad);
+    // Helper: construir resumen a partir de carts/cart_items cuando no hay purchases útiles
+    private Map<String, Object> computeSummaryFromCarts() {
+        List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
+        int totalVentas = carts != null ? carts.size() : 0;
+        float facturacionTotal = 0f;
+        int productosVendidos = 0;
+        java.util.Set<Integer> clientesActivos = new java.util.HashSet<>();
+        if (carts != null) {
+            for (ar.edu.uade.analytics.Entity.Cart c : carts) {
+                if (c == null) continue;
+                if (c.getFinalPrice() != null) facturacionTotal += c.getFinalPrice();
+                if (c.getItems() != null) {
+                    for (ar.edu.uade.analytics.Entity.CartItem item : c.getItems()) {
+                        if (item != null && item.getQuantity() != null) {
+                            productosVendidos += item.getQuantity();
+                        }
+                    }
+                }
+                if (c.getUser() != null && c.getUser().getId() != null) {
+                    clientesActivos.add(c.getUser().getId());
                 }
             }
         }
-        // Regresión lineal simple: calcular tendencia de ventas por producto
-        Map<Integer, Double> productTrends = computeProductTrends(productSalesByDay);
-        // No chart generation: return only metrics
-        Map<String, Object> response = new HashMap<>();
-        response.put("histogram", histogram);
-        response.put("chartBase64", null);
-        response.put("productTrends", productTrends);
-        return ResponseEntity.ok(response);
+        Map<String, Object> resumen = new HashMap<>();
+        resumen.put("totalVentas", totalVentas);
+        resumen.put("facturacionTotal", facturacionTotal);
+        resumen.put("productosVendidos", productosVendidos);
+        resumen.put("clientesActivos", clientesActivos.size());
+        return resumen;
+    }
+
+    // ----------------- Endpoints adicionales solicitados -----------------
+
+    @GetMapping("/top-customers")
+    public ResponseEntity<Map<String, Object>> getTopCustomers(
+            @RequestParam(defaultValue = "10") int limit) {
+        List<Purchase> purchases = purchaseService.getAllPurchases();
+        Map<Integer, Float> spendByUser = new HashMap<>();
+        Map<Integer, Integer> salesByUser = new HashMap<>();
+        Map<Integer, String> nameByUser = new HashMap<>();
+        Map<Integer, String> emailByUser = new HashMap<>();
+        for (Purchase p : purchases) {
+            if (p.getStatus() != Purchase.Status.CONFIRMED) continue;
+            if (p.getUser() == null) continue;
+            Integer uid = p.getUser().getId();
+            nameByUser.put(uid, p.getUser().getName());
+            emailByUser.put(uid, p.getUser().getEmail());
+            float price = (p.getCart() != null && p.getCart().getFinalPrice() != null) ? p.getCart().getFinalPrice() : 0f;
+            spendByUser.put(uid, spendByUser.getOrDefault(uid, 0f) + price);
+            salesByUser.put(uid, salesByUser.getOrDefault(uid, 0) + 1);
+        }
+        // Fallback: carts por usuario
+        if (spendByUser.isEmpty()) {
+            List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
+            for (ar.edu.uade.analytics.Entity.Cart c : carts) {
+                if (c.getUser() == null) continue;
+                Integer uid = c.getUser().getId();
+                nameByUser.put(uid, c.getUser().getName());
+                emailByUser.put(uid, c.getUser().getEmail());
+                float price = c.getFinalPrice() != null ? c.getFinalPrice() : 0f;
+                spendByUser.put(uid, spendByUser.getOrDefault(uid, 0f) + price);
+                salesByUser.put(uid, salesByUser.getOrDefault(uid, 0) + 1);
+            }
+        }
+        List<Map.Entry<Integer, Float>> sorted = spendByUser.entrySet().stream()
+                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+                .limit(limit)
+                .toList();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<Integer, Float> e : sorted) {
+            Integer uid = e.getKey();
+            Map<String, Object> row = new HashMap<>();
+            row.put("userId", uid);
+            row.put("name", nameByUser.get(uid));
+            row.put("email", emailByUser.get(uid));
+            row.put("totalSpent", e.getValue());
+            row.put("ventas", salesByUser.getOrDefault(uid, 0));
+            result.add(row);
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("data", result);
+        body.put("chartBase64", null);
+        return ResponseEntity.ok(body);
+    }
+
+    @GetMapping("/histogram")
+    public ResponseEntity<Map<String, Object>> getSalesHistogram(@RequestParam(defaultValue = "10") int bins) {
+        List<Float> amounts = new ArrayList<>();
+        for (Purchase p : purchaseService.getAllPurchases()) {
+            if (p.getStatus() != Purchase.Status.CONFIRMED) continue;
+            if (p.getCart() != null && p.getCart().getFinalPrice() != null) amounts.add(p.getCart().getFinalPrice());
+        }
+        if (amounts.isEmpty()) {
+            for (ar.edu.uade.analytics.Entity.Cart c : cartRepository.findAll()) {
+                if (c.getFinalPrice() != null) amounts.add(c.getFinalPrice());
+            }
+        }
+        Map<String, Object> resp = new HashMap<>();
+        List<Map<String, Object>> data = new ArrayList<>();
+        if (amounts.isEmpty()) {
+            resp.put("data", data);
+            resp.put("chartBase64", null);
+            return ResponseEntity.ok(resp);
+        }
+        float min = amounts.stream().min(Float::compare).orElse(0f);
+        float max = amounts.stream().max(Float::compare).orElse(min);
+        if (bins < 1) bins = 1;
+        if (max == min) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("binStart", min);
+            row.put("binEnd", max);
+            row.put("count", amounts.size());
+            data.add(row);
+            resp.put("data", data);
+            resp.put("chartBase64", null);
+            return ResponseEntity.ok(resp);
+        }
+        float width = (max - min) / bins;
+        int[] counts = new int[bins];
+        for (Float v : amounts) {
+            int idx = (int) Math.floor((v - min) / width);
+            if (idx == bins) idx = bins - 1;
+            counts[idx]++;
+        }
+        for (int i = 0; i < bins; i++) {
+            float start = min + i * width;
+            float end = (i == bins - 1) ? max : start + width;
+            Map<String, Object> row = new HashMap<>();
+            row.put("binStart", start);
+            row.put("binEnd", end);
+            row.put("count", counts[i]);
+            data.add(row);
+        }
+        resp.put("data", data);
+        resp.put("chartBase64", null);
+        return ResponseEntity.ok(resp);
     }
 
     @GetMapping("/correlation")
-    public ResponseEntity<Map<String, Object>> getSalesCorrelation(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        if (startDate != null || endDate != null) {
-            purchases = purchases.stream().filter(p -> {
-                LocalDateTime fecha = p.getDate();
-                return (startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate));
-            }).toList();
-        }
-        // ETL: Relacionar cantidad de compras vs dinero gastado por usuario
-        Map<Integer, Integer> userPurchaseCount = new HashMap<>();
-        Map<Integer, Float> userSpent = new HashMap<>();
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED && purchase.getUser() != null) {
-                Integer userId = purchase.getUser().getId();
-                userPurchaseCount.put(userId, userPurchaseCount.getOrDefault(userId, 0) + 1);
-                float gasto = purchase.getCart() != null && purchase.getCart().getFinalPrice() != null ? purchase.getCart().getFinalPrice() : 0f;
-                userSpent.put(userId, userSpent.getOrDefault(userId, 0f) + gasto);
+    public ResponseEntity<Map<String, Object>> getCorrelation() {
+        Map<Integer, Integer> unitsByProduct = new HashMap<>();
+        Map<Integer, Float> priceByProduct = new HashMap<>();
+        for (Purchase p : purchaseService.getAllPurchases()) {
+            if (p.getStatus() != Purchase.Status.CONFIRMED) continue;
+            if (p.getCart() == null || p.getCart().getItems() == null) continue;
+            for (ar.edu.uade.analytics.Entity.CartItem item : p.getCart().getItems()) {
+                if (item == null || item.getProduct() == null) continue;
+                Integer pid = item.getProduct().getId();
+                Integer q = item.getQuantity() != null ? item.getQuantity() : 0;
+                if (pid == null) continue;
+                unitsByProduct.put(pid, unitsByProduct.getOrDefault(pid, 0) + q);
+                if (item.getProduct().getPrice() != null) priceByProduct.put(pid, item.getProduct().getPrice());
             }
         }
-        // Preparar datos para scatter plot
-        List<Float> xList = new ArrayList<>(); // cantidad de compras
-        List<Float> yList = new ArrayList<>(); // dinero gastado
-        for (Integer userId : userPurchaseCount.keySet()) {
-            xList.add(userPurchaseCount.get(userId).floatValue());
-            yList.add(userSpent.get(userId));
+        if (unitsByProduct.isEmpty()) {
+            List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
+            if (carts != null) {
+                for (ar.edu.uade.analytics.Entity.Cart c : carts) {
+                    if (c == null || c.getItems() == null) continue;
+                    for (ar.edu.uade.analytics.Entity.CartItem item : c.getItems()) {
+                        if (item == null || item.getProduct() == null) continue;
+                        Integer pid = item.getProduct().getId();
+                        Integer q = item.getQuantity() != null ? item.getQuantity() : 0;
+                        if (pid == null) continue;
+                        unitsByProduct.put(pid, unitsByProduct.getOrDefault(pid, 0) + q);
+                        if (item.getProduct().getPrice() != null) priceByProduct.put(pid, item.getProduct().getPrice());
+                    }
+                }
+            }
         }
-        // ML: Calcular regresión lineal (y = a + bx)
-        Map<String, Double> regression = computeRegressionFromXY(xList, yList);
-        // No chart generation: return only metrics
-        Map<String, Object> response = new HashMap<>();
-        response.put("chartBase64", null);
-        response.put("regression", regression);
-        return ResponseEntity.ok(response);
+        List<Map<String, Object>> points = new ArrayList<>();
+        ar.edu.uade.analytics.Repository.ProductRepository pr = purchaseService.getProductRepository();
+        for (Map.Entry<Integer, Integer> e : unitsByProduct.entrySet()) {
+            Integer pid = e.getKey();
+            ar.edu.uade.analytics.Entity.Product prod = null;
+            if (pr != null) {
+                prod = pr.findById(pid).orElse(null);
+            }
+            Map<String, Object> m = new HashMap<>();
+            m.put("productId", pid);
+            m.put("title", prod != null ? prod.getTitle() : ("ID " + pid));
+            m.put("price", priceByProduct.getOrDefault(pid, 0f));
+            m.put("unitsSold", e.getValue());
+            points.add(m);
+        }
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("data", points);
+        resp.put("chartBase64", null);
+        return ResponseEntity.ok(resp);
     }
 
     @GetMapping("/category-growth")
     public ResponseEntity<Map<String, Object>> getCategoryGrowth(
-            @RequestParam Integer categoryId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        if (startDate != null || endDate != null) {
-            purchases = purchases.stream().filter(p -> {
-                LocalDateTime fecha = p.getDate();
-                return (startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate));
-            }).toList();
-        }
-        // Agrupar ventas por fecha solo para la categoría elegida (por ID)
-        Map<String, Integer> dateSales = new HashMap<>(); // fecha -> cantidad
-        String categoryName = null;
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED && purchase.getCart() != null && purchase.getCart().getItems() != null) {
-                String fecha = purchase.getDate().toLocalDate().toString();
-                for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
-                    ar.edu.uade.analytics.Entity.Product product = item.getProduct();
-                    if (product != null && product.getCategories() != null) {
-                        boolean match = product.getCategories().stream().anyMatch(cat -> cat.getId().equals(categoryId));
-                        if (match) {
-                            // Obtener el nombre de la categoría para el gráfico (solo la primera vez)
-                            if (categoryName == null) {
-                                categoryName = product.getCategories().stream().filter(cat -> cat.getId().equals(categoryId)).map(cat -> cat.getName()).findFirst().orElse("Categoría " + categoryId);
-                            }
-                            Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
-                            dateSales.put(fecha, dateSales.getOrDefault(fecha, 0) + cantidad);
-                        }
+        Map<String, Integer> totals = new HashMap<>();
+        for (Purchase p : purchaseService.getAllPurchases()) {
+            if (p.getStatus() != Purchase.Status.CONFIRMED) continue;
+            LocalDateTime fecha = p.getDate();
+            if (fecha == null) continue; // evitar NPE al filtrar por fecha
+            if ((startDate != null && fecha.isBefore(startDate)) || (endDate != null && fecha.isAfter(endDate))) continue;
+            if (p.getCart() == null || p.getCart().getItems() == null) continue;
+            for (ar.edu.uade.analytics.Entity.CartItem item : p.getCart().getItems()) {
+                if (item == null) continue;
+                ar.edu.uade.analytics.Entity.Product product = item.getProduct();
+                Integer q = item.getQuantity() != null ? item.getQuantity() : 0;
+                if (product != null && product.getCategories() != null && !product.getCategories().isEmpty()) {
+                    for (ar.edu.uade.analytics.Entity.Category cat : product.getCategories()) {
+                        String name = cat != null ? cat.getName() : null;
+                        if (name == null) name = "Otros";
+                        totals.put(name, totals.getOrDefault(name, 0) + q);
                     }
+                } else {
+                    totals.put("Otros", totals.getOrDefault("Otros", 0) + q);
                 }
             }
         }
-        if (categoryName == null) {
-            categoryName = "Categoría " + categoryId;
+        // Fallback: eventos "Compra confirmada" para mapear códigos a categorías
+        if (totals.isEmpty()) {
+            List<ar.edu.uade.analytics.Entity.ConsumedEventLog> logs = consumedEventLogRepository.findByStatusAndEventTypeContainingIgnoreCaseOrderByProcessedAtAsc(
+                    ar.edu.uade.analytics.Entity.ConsumedEventLog.Status.PROCESSED, "Compra confirmada");
+            if (logs != null) {
+                ar.edu.uade.analytics.Repository.ProductRepository pr = purchaseService.getProductRepository();
+                for (ar.edu.uade.analytics.Entity.ConsumedEventLog log : logs) {
+                    try {
+                        java.util.Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), java.util.Map.class);
+                        Object payload = root.get("payload");
+                        if (payload instanceof Map<?,?> payloadMap) {
+                            Object cart = payloadMap.get("cart");
+                            if (cart instanceof Map<?,?> cartMap) {
+                                Object items = cartMap.get("items");
+                                if (items instanceof List<?> list) {
+                                    for (Object o : list) {
+                                        if (o instanceof Map<?,?> m) {
+                                            Integer code = null; Integer q = 0;
+                                            Object pc = m.get("productCode"); if (pc instanceof Number) code = ((Number) pc).intValue();
+                                            Object qq = m.get("quantity");   if (qq instanceof Number) q = ((Number) qq).intValue();
+                                            if (code != null && pr != null) {
+                                                ar.edu.uade.analytics.Entity.Product prod = pr.findByProductCode(code);
+                                                if (prod != null && prod.getCategories() != null && !prod.getCategories().isEmpty()) {
+                                                    for (ar.edu.uade.analytics.Entity.Category cat : prod.getCategories()) {
+                                                        String name = cat != null ? cat.getName() : null;
+                                                        if (name == null) name = "Otros";
+                                                        totals.put(name, totals.getOrDefault(name, 0) + q);
+                                                    }
+                                                } else {
+                                                    totals.put("Otros", totals.getOrDefault("Otros", 0) + q);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
         }
-        Map<String, Object> response = new HashMap<>();
-        response.put("categoryName", categoryName);
-        response.put("categoryGrowth", dateSales);
-        response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
+        List<Map<String, Object>> data = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : totals.entrySet()) {
+            data.add(new HashMap<>(Map.of("category", e.getKey(), "unidades", e.getValue())));
+        }
+        data.sort((a,b)->((Comparable)b.get("unidades")).compareTo(a.get("unidades")));
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("data", data);
+        resp.put("chartBase64", null);
+        return ResponseEntity.ok(resp);
     }
 
     @GetMapping("/product-events-timeline")
     public ResponseEntity<Map<String, Object>> getProductEventsTimeline(
-            @RequestParam(required = false) Integer productId,
+            @RequestParam(required = false) Integer productCode,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @RequestParam(required = false, defaultValue = "5") int topN) {
-        // Limitar topN entre 1 y 10
-        if (topN < 1) topN = 1;
-        if (topN > 10) topN = 10;
-        List<ar.edu.uade.analytics.Entity.StockChangeLog> logs;
-        if (productId != null) {
-            logs = stockChangeLogRepository.findByProductIdOrderByChangedAtAsc(productId);
-            // Filtrar por fechas si corresponde
-            if (startDate != null || endDate != null) {
-                logs = logs.stream().filter(log -> {
-                    LocalDateTime fecha = log.getChangedAt();
-                    return (startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate));
-                }).toList();
-            }
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+        OffsetDateTime start = startDate != null ? startDate.atOffset(ZoneOffset.UTC) : null;
+        OffsetDateTime end = endDate != null ? endDate.atOffset(ZoneOffset.UTC) : null;
+        List<ar.edu.uade.analytics.Entity.ConsumedEventLog> logs;
+        if (start != null && end != null) {
+            logs = consumedEventLogRepository.findByStatusAndEventTypeContainingIgnoreCaseAndProcessedAtBetweenOrderByProcessedAtAsc(
+                    ar.edu.uade.analytics.Entity.ConsumedEventLog.Status.PROCESSED, "Compra", start, end);
         } else {
-            // 1. Filtrar todos los logs por fecha primero
-            logs = stockChangeLogRepository.findAll();
-            if (startDate != null || endDate != null) {
-                logs = logs.stream().filter(log -> {
-                    LocalDateTime fecha = log.getChangedAt();
-                    return (startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate));
-                }).toList();
-            }
-            // 2. Si no hay logs en el rango, devolver vacío
-            if (logs.isEmpty()) {
-                Map<String, Object> response = new HashMap<>();
-                response.put("events", new ArrayList<>());
-                response.put("chartBase64", null);
-                return ResponseEntity.ok(response);
-            }
-            // 3. Contar eventos por producto SOLO en el rango
-            Map<Integer, Integer> productEventCount = new HashMap<>();
-            for (ar.edu.uade.analytics.Entity.StockChangeLog log : logs) {
-                Integer pid = log.getProduct().getId();
-                productEventCount.put(pid, productEventCount.getOrDefault(pid, 0) + 1);
-            }
-            // 4. Obtener los topN productos con más eventos en el rango
-            List<Integer> topProductIds = productEventCount.entrySet().stream()
-                    .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                    .limit(topN)
-                    .map(Map.Entry::getKey)
-                    .toList();
-            // 5. Filtrar logs solo para esos productos
-            logs = logs.stream()
-                    .filter(log -> topProductIds.contains(log.getProduct().getId()))
-                    .toList();
+            logs = consumedEventLogRepository.findByStatusAndEventTypeContainingIgnoreCaseOrderByProcessedAtAsc(
+                    ar.edu.uade.analytics.Entity.ConsumedEventLog.Status.PROCESSED, "Compra");
         }
-        // Delegar al helper que arma eventos, dataset y gráfico a partir de los logs filtrados
-        Map<String, Object> response = buildTimelineFromLogs(logs);
-        return ResponseEntity.ok(response);
-    }
-
-    // Package-private helper: arma la respuesta (events + chartBase64) a partir de logs ya filtrados por fecha/producto
-    public Map<String, Object> buildTimelineFromLogs(List<ar.edu.uade.analytics.Entity.StockChangeLog> logs) {
-        List<Map<String, Object>> events = new ArrayList<>();
-        for (ar.edu.uade.analytics.Entity.StockChangeLog log : logs) {
-            LocalDateTime fecha = log.getChangedAt();
-            Map<String, Object> event = new HashMap<>();
-            event.put("date", fecha.toString());
-            event.put("type", "StockChange");
-            event.put("productId", log.getProduct() != null ? log.getProduct().getId() : null);
-            event.put("productTitle", log.getProduct() != null ? log.getProduct().getTitle() : null);
-            event.put("oldStock", log.getOldStock());
-            event.put("newStock", log.getNewStock());
-            event.put("quantityChanged", log.getQuantityChanged());
-            event.put("reason", log.getReason());
-            events.add(event);
-        }
-        Map<String, Object> response = new HashMap<>();
-        response.put("events", events);
-        response.put("chartBase64", null);
-        return response;
-    }
-
-    // Package-private helper: calcular tendencias (pendiente) a partir de ventas por días por producto
-    Map<Integer, Double> computeProductTrends(Map<Integer, List<Integer>> productSalesByDay) {
-        Map<Integer, Double> productTrends = new HashMap<>();
-        for (Map.Entry<Integer, List<Integer>> entry : productSalesByDay.entrySet()) {
-            List<Integer> ventas = entry.getValue();
-            int n = ventas.size();
-            if (n < 2) {
-                productTrends.put(entry.getKey(), 0.0);
-                continue;
-            }
-            double sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-            for (int i = 0; i < n; i++) {
-                sumX += i;
-                sumY += ventas.get(i);
-                sumXY += i * ventas.get(i);
-                sumXX += i * i;
-            }
-            double slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX + 0.0001);
-            productTrends.put(entry.getKey(), slope);
-        }
-        return productTrends;
-    }
-
-    // Package-private helper: construir histograma a partir de map userId->purchaseCount
-    public Map<String, Integer> computeHistogramFromUserCounts(Map<Integer, Integer> userPurchaseCount) {
-        Map<String, Integer> histogram = new HashMap<>();
-        for (Integer count : userPurchaseCount.values()) {
-            String rango = count <= 2 ? "1-2" : count <= 5 ? "3-5" : "6+";
-            histogram.put(rango, histogram.getOrDefault(rango, 0) + 1);
-        }
-        return histogram;
-    }
-
-    // Package-private helper: calcular regresi��n lineal (a, b) dados vectores x,y
-    public Map<String, Double> computeRegressionFromXY(List<Float> xList, List<Float> yList) {
-        int n = xList.size();
-        double sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-        for (int i = 0; i < n; i++) {
-            sumX += xList.get(i);
-            sumY += yList.get(i);
-            sumXY += xList.get(i) * yList.get(i);
-            sumXX += xList.get(i) * xList.get(i);
-        }
-        double b = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX + 0.0001);
-        double a = (sumY - b * sumX) / (n + 0.0001);
-        return Map.of("a", a, "b", b);
-    }
-
-    // Package-private helper: calcular productSales map desde una lista de purchases (aplica filtros start/end, categoryId, brandId opcionales)
-    public Map<Integer, Integer> computeProductSalesFromPurchases(List<Purchase> purchases, LocalDateTime startDate, LocalDateTime endDate, Integer categoryId, Integer brandId) {
-        Map<Integer, Integer> productSales = new HashMap<>();
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED && purchase.getCart() != null && purchase.getCart().getItems() != null) {
-                LocalDateTime fecha = purchase.getDate();
-                if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
-                    for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
-                        ar.edu.uade.analytics.Entity.Product prod = item.getProduct();
-                        if (prod == null) continue;
-                        if (categoryId != null && (prod.getCategories() == null || prod.getCategories().stream().noneMatch(c -> c.getId().equals(categoryId)))) continue;
-                        if (brandId != null && (prod.getBrand() == null || !prod.getBrand().getId().equals(brandId))) continue;
-                        Integer productId = prod.getId();
-                        Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
-                        productSales.put(productId, productSales.getOrDefault(productId, 0) + cantidad);
-                    }
-                }
-            }
-        }
-        return productSales;
-    }
-
-    // Package-private helper: compute sales KPIs from purchases within optional date range
-    public Map<String, Object> computeSalesKPIs(List<Purchase> purchases, LocalDateTime startDate, LocalDateTime endDate) {
-        int totalVentas = 0;
-        float facturacionTotal = 0f;
-        int productosVendidos = 0;
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
-                LocalDateTime fecha = purchase.getDate();
-                if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
-                    totalVentas++;
-                    if (purchase.getCart() != null) {
-                        facturacionTotal += purchase.getCart().getFinalPrice() != null ? purchase.getCart().getFinalPrice() : 0f;
-                        if (purchase.getCart().getItems() != null) {
-                            productosVendidos += purchase.getCart().getItems().stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
-                        }
-                    }
-                }
-            }
-        }
-        float facturacionTotalEnMiles = Math.round((facturacionTotal / 1000f) * 100f) / 100f;
-        Map<String, Object> kpi = new HashMap<>();
-        kpi.put("totalVentas", totalVentas);
-        kpi.put("facturacionTotal", facturacionTotal);
-        kpi.put("productosVendidos", productosVendidos);
-        kpi.put("facturacionTotalEnMiles", facturacionTotalEnMiles);
-        return kpi;
-    }
-
-    // Package-private helper: compute category sales map from purchases within optional date range
-    public Map<String, Integer> computeCategorySales(List<Purchase> purchases, LocalDateTime startDate, LocalDateTime endDate) {
-        Map<String, Integer> categorySales = new HashMap<>();
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
-                LocalDateTime fecha = purchase.getDate();
-                if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
-                    if (purchase.getCart() != null && purchase.getCart().getItems() != null) {
-                        for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
-                            ar.edu.uade.analytics.Entity.Product product = item.getProduct();
-                            if (product != null && product.getCategories() != null) {
-                                for (ar.edu.uade.analytics.Entity.Category category : product.getCategories()) {
-                                    String catName = category.getName();
-                                    Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
-                                    categorySales.put(catName, categorySales.getOrDefault(catName, 0) + cantidad);
+        if (logs == null) logs = java.util.Collections.emptyList();
+        List<Map<String, Object>> data = new ArrayList<>();
+        for (ar.edu.uade.analytics.Entity.ConsumedEventLog log : logs) {
+            try {
+                java.util.Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), java.util.Map.class);
+                String tsStr;
+                String type = log.getEventType();
+                String when = log.getProcessedAt() != null ? log.getProcessedAt().toString() : null;
+                boolean include = (productCode == null);
+                Object payload = root.get("payload");
+                if (payload instanceof Map<?,?> payloadMap) {
+                    Object cart = payloadMap.get("cart");
+                    if (cart instanceof Map<?,?> cartMap) {
+                        Object items = cartMap.get("items");
+                        if (items instanceof List<?> list) {
+                            for (Object o : list) {
+                                if (o instanceof Map<?,?> m) {
+                                    Object pc = m.get("productCode");
+                                    if (productCode != null && pc instanceof Number && ((Number) pc).intValue() == productCode) {
+                                        include = true; break;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-        }
-        return categorySales;
-    }
-
-    // Package-private helper: compute brand sales map from purchases within optional date range
-    public Map<String, Integer> computeBrandSales(List<Purchase> purchases, LocalDateTime startDate, LocalDateTime endDate) {
-        Map<String, Integer> brandSales = new HashMap<>();
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
-                LocalDateTime fecha = purchase.getDate();
-                if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
-                    if (purchase.getCart() != null && purchase.getCart().getItems() != null) {
-                        for (ar.edu.uade.analytics.Entity.CartItem item : purchase.getCart().getItems()) {
-                            ar.edu.uade.analytics.Entity.Product product = item.getProduct();
-                            if (product != null && product.getBrand() != null && product.getBrand().getName() != null) {
-                                String brandName = product.getBrand().getName();
-                                Integer cantidad = item.getQuantity() != null ? item.getQuantity() : 0;
-                                brandSales.put(brandName, brandSales.getOrDefault(brandName, 0) + cantidad);
-                            }
-                        }
+                if (include) {
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("eventType", type);
+                    row.put("processedAt", when);
+                    // timestamp del evento si viene
+                    Object ts = root.get("timestamp");
+                    if (ts instanceof Number) {
+                        long seconds = ((Number) ts).longValue();
+                        row.put("emittedAt", java.time.Instant.ofEpochSecond(seconds).toString());
                     }
+                    data.add(row);
                 }
-            }
+            } catch (Exception ignored) {}
         }
-        return brandSales;
-    }
-
-    // Package-private helper: compute daily sales map (date -> count) from purchases within optional date range
-    public Map<String, Integer> computeDailySalesMap(List<Purchase> purchases, LocalDateTime startDate, LocalDateTime endDate) {
-        Map<String, Integer> dailySales = new HashMap<>();
-        for (Purchase purchase : purchases) {
-            if (purchase.getStatus() == Purchase.Status.CONFIRMED) {
-                LocalDateTime fecha = purchase.getDate();
-                if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
-                    String day = fecha.toLocalDate().toString();
-                    dailySales.put(day, dailySales.getOrDefault(day, 0) + 1);
-                }
-            }
-        }
-        return dailySales;
-    }
-
-    // Package-private helper: compute stock history data (list of maps) from logs and product + profit flag
-    public List<Map<String, Object>> computeStockHistoryData(ar.edu.uade.analytics.Entity.Product product, List<ar.edu.uade.analytics.Entity.StockChangeLog> logs, boolean showProfit, LocalDateTime startDate, LocalDateTime endDate) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        float profitAccum = 0f;
-        for (ar.edu.uade.analytics.Entity.StockChangeLog log : logs) {
-            LocalDateTime fecha = log.getChangedAt();
-            if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
-                Map<String, Object> info = new HashMap<>();
-                info.put("date", fecha.toLocalDate().toString());
-                info.put("oldStock", log.getOldStock());
-                info.put("newStock", log.getNewStock());
-                info.put("quantityChanged", log.getQuantityChanged());
-                info.put("reason", log.getReason());
-                if (showProfit && "Venta".equalsIgnoreCase(log.getReason())) {
-                    Float price = product.getPrice() != null ? product.getPrice() : 0f;
-                    float profit = price * log.getQuantityChanged();
-                    profitAccum += profit;
-                    info.put("profit", profit);
-                    info.put("profitAccum", profitAccum);
-                }
-                result.add(info);
-            }
-        }
-        return result;
-    }
-
-    @GetMapping("/at-risk-customers")
-    public ResponseEntity<Map<String,Object>> getAtRiskCustomers(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        if (endDate == null) endDate = LocalDateTime.now();
-        if (startDate == null) startDate = endDate.minusDays(29);
-        long days = ChronoUnit.DAYS.between(startDate.toLocalDate(), endDate.toLocalDate()) + 1;
-        LocalDateTime prevEnd = startDate.minusDays(1);
-        LocalDateTime prevStart = prevEnd.minusDays(days - 1);
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        Map<Integer, ar.edu.uade.analytics.Entity.User> userMap = new HashMap<>();
-        Set<Integer> prevActive = new java.util.HashSet<>();
-        Set<Integer> curActive = new java.util.HashSet<>();
-        Map<Integer, LocalDateTime> lastPrevPurchase = new HashMap<>();
-        for (Purchase p : purchases) {
-            if (p.getStatus() != Purchase.Status.CONFIRMED || p.getUser()==null) continue;
-            LocalDateTime d = p.getDate();
-            int uid = p.getUser().getId();
-            userMap.put(uid, p.getUser());
-            if (!d.isBefore(prevStart) && !d.isAfter(prevEnd)) {
-                prevActive.add(uid);
-                lastPrevPurchase.put(uid, lastPrevPurchase.getOrDefault(uid, d).isAfter(d)? lastPrevPurchase.get(uid): d);
-            }
-            if (!d.isBefore(startDate) && !d.isAfter(endDate)) {
-                curActive.add(uid);
-            }
-        }
-        List<Map<String,Object>> atRisk = new ArrayList<>();
-        for (Integer uid : prevActive) {
-            if (!curActive.contains(uid)) {
-                ar.edu.uade.analytics.Entity.User u = userMap.get(uid);
-                Map<String,Object> row = new HashMap<>();
-                row.put("userId", uid);
-                row.put("name", u!=null? u.getName(): "Usuario "+uid);
-                row.put("email", u!=null? u.getEmail(): null);
-                row.put("lastPurchase", lastPrevPurchase.get(uid)!=null? lastPrevPurchase.get(uid).toString(): null);
-                atRisk.add(row);
-            }
-        }
-        Map<String,Object> resp = new HashMap<>();
-        resp.put("data", atRisk);
-        return ResponseEntity.ok(resp);
-    }
-
-    @GetMapping("/slow-movers")
-    public ResponseEntity<Map<String,Object>> getSlowMovers(
-            @RequestParam(defaultValue = "20") int minStock,
-            @RequestParam(defaultValue = "5") int maxSales,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        if (endDate == null) endDate = LocalDateTime.now();
-        if (startDate == null) startDate = endDate.minusDays(29);
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        Map<Integer,Integer> sales = new HashMap<>();
-        Map<Integer,LocalDateTime> lastSale = new HashMap<>();
-        for (Purchase p: purchases) {
-            if (p.getStatus()!= Purchase.Status.CONFIRMED || p.getCart()==null || p.getCart().getItems()==null) continue;
-            LocalDateTime d = p.getDate();
-            if (d.isBefore(startDate) || d.isAfter(endDate)) continue;
-            for (ar.edu.uade.analytics.Entity.CartItem it: p.getCart().getItems()) {
-                if (it.getProduct()==null) continue;
-                int pid = it.getProduct().getId();
-                int qty = it.getQuantity()!=null? it.getQuantity():0;
-                sales.put(pid, sales.getOrDefault(pid,0)+qty);
-                lastSale.put(pid, lastSale.getOrDefault(pid,d).isAfter(d)? lastSale.get(pid): d);
-            }
-        }
-        List<ar.edu.uade.analytics.Entity.Product> products = purchaseService.getProductRepository().findAll();
-        List<Map<String,Object>> result = new ArrayList<>();
-        for (ar.edu.uade.analytics.Entity.Product pr: products) {
-            Integer stock = pr.getStock();
-            if (stock==null) continue;
-            if (stock < minStock) continue; // slow mover: bastante stock
-            int s = sales.getOrDefault(pr.getId(),0);
-            if (s <= maxSales) {
-                Map<String,Object> row = new HashMap<>();
-                row.put("productId", pr.getId());
-                row.put("title", pr.getTitle());
-                row.put("stock", stock);
-                row.put("sales", s);
-                LocalDateTime ls = lastSale.get(pr.getId());
-                row.put("daysSinceLastSale", ls==null? null: ChronoUnit.DAYS.between(ls.toLocalDate(), endDate.toLocalDate()));
-                result.add(row);
-            }
-        }
-        Map<String,Object> resp = new HashMap<>();
-        resp.put("data", result);
-        return ResponseEntity.ok(resp);
-    }
-
-    @GetMapping("/fast-movers")
-    public ResponseEntity<Map<String,Object>> getFastMovers(
-            @RequestParam(defaultValue = "30") double growthPct,
-            @RequestParam(defaultValue = "10") int stockThreshold,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        if (endDate == null) endDate = LocalDateTime.now();
-        if (startDate == null) startDate = endDate.minusDays(29);
-        long days = ChronoUnit.DAYS.between(startDate.toLocalDate(), endDate.toLocalDate()) + 1;
-        LocalDateTime prevEnd = startDate.minusDays(1);
-        LocalDateTime prevStart = prevEnd.minusDays(days - 1);
-        List<Purchase> purchases = purchaseService.getAllPurchases();
-        Map<Integer,Integer> curSales = new HashMap<>();
-        Map<Integer,Integer> prevSales = new HashMap<>();
-        for (Purchase p: purchases) {
-            if (p.getStatus()!= Purchase.Status.CONFIRMED || p.getCart()==null || p.getCart().getItems()==null) continue;
-            LocalDateTime d = p.getDate();
-            boolean isCur = !d.isBefore(startDate) && !d.isAfter(endDate);
-            boolean isPrev = !d.isBefore(prevStart) && !d.isAfter(prevEnd);
-            if (!isCur && !isPrev) continue;
-            for (ar.edu.uade.analytics.Entity.CartItem it: p.getCart().getItems()) {
-                if (it.getProduct()==null) continue;
-                int pid = it.getProduct().getId();
-                int qty = it.getQuantity()!=null? it.getQuantity():0;
-                if (isCur) curSales.put(pid, curSales.getOrDefault(pid,0)+qty);
-                if (isPrev) prevSales.put(pid, prevSales.getOrDefault(pid,0)+qty);
-            }
-        }
-        List<ar.edu.uade.analytics.Entity.Product> products = purchaseService.getProductRepository().findAll();
-        List<Map<String,Object>> result = new ArrayList<>();
-        for (ar.edu.uade.analytics.Entity.Product pr: products) {
-            int c = curSales.getOrDefault(pr.getId(),0);
-            int p = prevSales.getOrDefault(pr.getId(),0);
-            if (p==0 && c==0) continue;
-            double g = p==0? 100.0: ((double)(c-p)/p)*100.0;
-            Integer stock = pr.getStock();
-            if (g >= growthPct && stock!=null && stock <= stockThreshold) {
-                Map<String,Object> row = new HashMap<>();
-                row.put("productId", pr.getId());
-                row.put("title", pr.getTitle());
-                row.put("growthPct", g);
-                row.put("salesCurrent", c);
-                row.put("salesPrevious", p);
-                row.put("stock", stock);
-                result.add(row);
-            }
-        }
-        Map<String,Object> resp = new HashMap<>();
-        resp.put("data", result);
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("data", data);
+        resp.put("chartBase64", null);
         return ResponseEntity.ok(resp);
     }
 }

@@ -261,7 +261,7 @@ public class EventDispatcherService {
 
     public void handleSales(String normalizedType, JsonNode payload, OffsetDateTime eventTs) {
         switch (normalizedType) {
-            case "post: compra confirmada" -> handleCompraConfirmada(payload);
+            case "post: compra confirmada" -> handleCompraConfirmada(payload, eventTs);
             case "post: compra pendiente", "delete: compra cancelada" -> saveAnalyticsEvent(normalizedType, payload);
             case "post: review creada" -> handleReview(payload);
             case "post: producto agregado a favoritos" -> handleFavAdd(payload);
@@ -272,8 +272,13 @@ public class EventDispatcherService {
         }
     }
 
-    @Transactional // NUEVO
+    @Transactional
     private void handleCompraConfirmada(JsonNode p) {
+        handleCompraConfirmada(p, null);
+    }
+
+    @Transactional // NUEVO overload con timestamp
+    private void handleCompraConfirmada(JsonNode p, OffsetDateTime eventTs) {
         if (p == null) return;
         // Usuario
         User user = null;
@@ -314,7 +319,7 @@ public class EventDispatcherService {
                     if (productCode == null || quantity == null) continue;
                     Product prod = productRepository.findByProductCode(productCode);
                     if (prod == null) {
-                        // Crear producto placeholder para no perder el ítem
+                        // Placeholder si falta
                         prod = new Product();
                         prod.setProductCode(productCode);
                         if (it.has("title")) prod.setTitle(asText(it, "title"));
@@ -333,13 +338,11 @@ public class EventDispatcherService {
             }
         }
         cart.setItems(items);
-
-        // Persistir carrito e ítems explícitamente para garantizar registros múltiples
         if (cartRepository != null) {
             cart = cartRepository.save(cart);
         }
 
-        // Precargar oldStock por productCode para todos los ítems
+        // Precargar stocks antiguos por código
         java.util.Set<Integer> codes = new java.util.HashSet<>();
         for (CartItem ci : items) {
             if (ci.getProduct() != null && ci.getProduct().getProductCode() != null) {
@@ -352,12 +355,9 @@ public class EventDispatcherService {
                 oldStockByCode.put(cs.getProductCode(), cs.getStock() == null ? 0 : cs.getStock());
             }
         }
-        // Completar con 0 los códigos no presentes en la consulta (productos recién creados o sin stock)
-        for (Integer code : codes) {
-            oldStockByCode.putIfAbsent(code, 0);
-        }
+        for (Integer code : codes) oldStockByCode.putIfAbsent(code, 0);
 
-        // Descontar stock y registrar logs por cada ítem usando el mapa precargado
+        // Descontar y loguear
         for (CartItem ci : items) {
             Product prod = ci.getProduct();
             Integer productCode = prod.getProductCode();
@@ -366,15 +366,13 @@ public class EventDispatcherService {
             int newStock = Math.max(0, oldStock - qty);
             prod.setStock(newStock);
             productRepository.save(prod);
-
-            // Actualizar el mapa por si el mismo producto aparece en más de un ítem
             oldStockByCode.put(productCode, newStock);
 
             StockChangeLog scl = new StockChangeLog();
             scl.setProduct(prod);
             scl.setOldStock(oldStock);
             scl.setNewStock(newStock);
-            scl.setQuantityChanged(qty); // POSITIVO, cantidad vendida
+            scl.setQuantityChanged(qty); // positivo
             scl.setChangedAt(LocalDateTime.now());
             scl.setReason("Venta - compra confirmada");
             stockChangeLogRepository.save(scl);
@@ -385,7 +383,9 @@ public class EventDispatcherService {
         purchase.setCart(cart);
         purchase.setUser(user);
         purchase.setStatus(Purchase.Status.CONFIRMED);
-        purchase.setDate(LocalDateTime.now());
+        LocalDateTime when = eventTs != null ? eventTs.toLocalDateTime() : LocalDateTime.now();
+        purchase.setDate(when);
+        // direction se deja null si no viene en el payload
         purchaseRepository.save(purchase);
         meterRegistry.counter("analytics.sales.purchase.confirmed").increment();
     }
