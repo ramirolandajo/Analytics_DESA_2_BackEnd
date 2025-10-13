@@ -14,6 +14,8 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
     @Query("select p.stock from Product p where p.productCode = :productCode")
     Integer findStockByProductCode(@Param("productCode") Integer productCode);
 
+    List<Product> findByStockLessThanEqual(int i);
+
     // Proyección para precargar stocks por código
     interface CodeStock {
         Integer getProductCode();

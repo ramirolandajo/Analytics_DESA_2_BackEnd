@@ -65,7 +65,7 @@ public class ProductController {
                 List<CategoryDTO> filteredCats = dto.getCategories().stream().filter(catDto -> catDto != null && catDto.getId() != null).toList();
                 cats = filteredCats.stream()
                         .map(catDto -> categoryRepository.findById((int) catDto.getId().intValue()).orElse(null))
-                        .collect(java.util.stream.Collectors.toSet());
+                        .collect(Collectors.toSet());
                 // Revisar si alguna categoría no existe
                 for (int i = 0; i < filteredCats.size(); i++) {
                     if (cats.toArray()[i] == null) {
@@ -161,7 +161,7 @@ public class ProductController {
             Set<Category> cats = dto.getCategories().stream()
                     .map(catDto -> categoryRepository.findById((int) catDto.getId().intValue()).orElse(null))
                     .filter(c -> c != null)
-                    .collect(java.util.stream.Collectors.toSet());
+                    .collect(Collectors.toSet());
             product.setCategories(new java.util.HashSet<>(cats));
         } else {
             product.setCategories(null);
@@ -243,13 +243,13 @@ public class ProductController {
         // Categorías
         if (dto.getCategories() != null && !dto.getCategories().isEmpty()) {
             // Filtrar elementos nulos antes de mapear y obtener entidades existentes
-            java.util.List<CategoryDTO> filteredCats = dto.getCategories().stream()
+            List<CategoryDTO> filteredCats = dto.getCategories().stream()
                     .filter(catDto -> catDto != null && catDto.getId() != null)
                     .toList();
-            Set<ar.edu.uade.analytics.Entity.Category> cats = filteredCats.stream()
+            Set<Category> cats = filteredCats.stream()
                     .map(catDto -> categoryRepository.findById((int) catDto.getId().intValue()).orElse(null))
                     .filter(c -> c != null)
-                    .collect(java.util.stream.Collectors.toSet());
+                    .collect(Collectors.toSet());
             product.setCategories(new java.util.HashSet<>(cats));
         } else {
             product.setCategories(null);
@@ -626,12 +626,12 @@ public class ProductController {
     @Transactional(timeout = 120)
     @PostMapping("/sync-mock-stock-changes-simple")
     public ResponseEntity<String> syncMockStockChangesSimple() {
-        List<ar.edu.uade.analytics.Communication.KafkaMockService.EditProductSimpleMessage> events = kafkaMockService.getEditProductMockSimpleList();
+        List<KafkaMockService.EditProductSimpleMessage> events = kafkaMockService.getEditProductMockSimpleList();
         if (events == null || events.isEmpty()) {
             return ResponseEntity.badRequest().body("no se encontraron eventos");
         }
         int procesados = 0;
-        for (ar.edu.uade.analytics.Communication.KafkaMockService.EditProductSimpleMessage event : events) {
+        for (KafkaMockService.EditProductSimpleMessage event : events) {
             if (event == null || event.payload == null) continue;
             Integer productCode = event.payload.productCode;
             Integer nuevoStock = event.payload.stock;
@@ -681,4 +681,25 @@ public class ProductController {
                     .collect(Collectors.toList()));
             return ResponseEntity.ok(result);
         }
+
+
+
+    @GetMapping("/low-stock")
+    public List<ProductDTO> getLowStockProducts() {
+        List<Product> lowStockProducts = productRepository.findByStockLessThanEqual(10);
+        return lowStockProducts.stream()
+                .map(this::toDTO)
+                .collect(Collectors.toList());}
+
+
+
+    //get por por id de producto
+    @GetMapping("/by-code/{productCode}")
+    public ProductDTO getProductByCode(@PathVariable("productCode") Integer productCode) {
+        Product product = productRepository.findByProductCode(productCode);
+        if (product == null) throw new RuntimeException("Producto no encontrado");
+        return toDTO(product);
+    }
 }
+
+

@@ -221,6 +221,8 @@ public class SalesAnalyticsController {
             }
             String title = (prod != null && prod.getTitle() != null) ? prod.getTitle() : ("ID " + entry.getKey());
             prodInfo.put("title", title);
+            String productCode = (prod != null && prod.getProductCode() != null) ? prod.getProductCode().toString() : "N/A";
+            prodInfo.put("productCode", productCode);
             result.add(prodInfo);
         }
         Map<String, Object> response = new HashMap<>();
@@ -422,7 +424,7 @@ public class SalesAnalyticsController {
                 float price = 0f;
                 int units = 0;
                 try {
-                    java.util.Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), java.util.Map.class);
+                    Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), Map.class);
                     // timestamp del evento si existe
                     Object ts = root.get("timestamp");
                     if (ts instanceof Number) {
@@ -587,7 +589,7 @@ public class SalesAnalyticsController {
         int totalVentas = carts != null ? carts.size() : 0;
         float facturacionTotal = 0f;
         int productosVendidos = 0;
-        java.util.Set<Integer> clientesActivos = new java.util.HashSet<>();
+        Set<Integer> clientesActivos = new java.util.HashSet<>();
         if (carts != null) {
             for (ar.edu.uade.analytics.Entity.Cart c : carts) {
                 if (c == null) continue;
@@ -762,6 +764,8 @@ public class SalesAnalyticsController {
             Map<String, Object> m = new HashMap<>();
             m.put("productId", pid);
             m.put("title", prod != null ? prod.getTitle() : ("ID " + pid));
+            String productCode = (prod != null && prod.getProductCode() != null) ? prod.getProductCode().toString() : "N/A";
+            m.put("productCode", productCode);
             m.put("price", priceByProduct.getOrDefault(pid, 0f));
             m.put("unitsSold", e.getValue());
             points.add(m);
@@ -806,7 +810,7 @@ public class SalesAnalyticsController {
                 ar.edu.uade.analytics.Repository.ProductRepository pr = purchaseService.getProductRepository();
                 for (ar.edu.uade.analytics.Entity.ConsumedEventLog log : logs) {
                     try {
-                        java.util.Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), java.util.Map.class);
+                        Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), Map.class);
                         Object payload = root.get("payload");
                         if (payload instanceof Map<?,?> payloadMap) {
                             Object cart = payloadMap.get("cart");
@@ -869,7 +873,7 @@ public class SalesAnalyticsController {
         List<Map<String, Object>> data = new ArrayList<>();
         for (ar.edu.uade.analytics.Entity.ConsumedEventLog log : logs) {
             try {
-                java.util.Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), java.util.Map.class);
+                Map<?,?> root = objectMapper.readValue(log.getPayloadJson(), Map.class);
                 String tsStr;
                 String type = log.getEventType();
                 String when = log.getProcessedAt() != null ? log.getProcessedAt().toString() : null;
