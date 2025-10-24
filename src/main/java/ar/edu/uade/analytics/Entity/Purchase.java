@@ -14,7 +14,7 @@ public class Purchase {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    @ManyToOne(cascade = CascadeType.ALL)
+    @ManyToOne // se quita cascade = CascadeType.ALL para evitar persist sobre Cart ya existente
     @JoinColumn(name = "cart_id", nullable = false)
     @JsonBackReference("purchase-cart")
     private Cart cart;

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.*;
 
 @Service
@@ -29,6 +30,7 @@ public class EventDispatcherService {
     private final UserRepository userRepository;
     private final MeterRegistry meterRegistry;
     private final StockChangeLogRepository stockChangeLogRepository;
+    private final CartRepository cartRepository; // NUEVO
 
     public EventDispatcherService(ObjectMapper mapper,
                                   ProductRepository productRepository,
@@ -41,7 +43,8 @@ public class EventDispatcherService {
                                   PurchaseRepository purchaseRepository,
                                   UserRepository userRepository,
                                   MeterRegistry meterRegistry,
-                                  StockChangeLogRepository stockChangeLogRepository) {
+                                  StockChangeLogRepository stockChangeLogRepository,
+                                  CartRepository cartRepository) { // NUEVO
         this.mapper = mapper;
         this.productRepository = productRepository;
         this.brandRepository = brandRepository;
@@ -54,14 +57,16 @@ public class EventDispatcherService {
         this.userRepository = userRepository;
         this.meterRegistry = meterRegistry;
         this.stockChangeLogRepository = stockChangeLogRepository;
+        this.cartRepository = cartRepository; // NUEVO
     }
 
-    // INVENTARIO
+     // INVENTARIO
     @Transactional
     public void handleInventory(String normalizedType, JsonNode payload) {
         switch (normalizedType) {
             case "put: actualizar stock" -> handleActualizarStock(payload);
             case "post: agregar un producto" -> handleUpsertProducto(payload);
+            case "post: producto creado" -> handleUpsertProducto(payload);
             case "patch: modificar un producto" -> handleUpsertProducto(payload);
             case "patch: producto desactivado" -> handleProductoActivo(payload, false);
             case "patch: producto activado", "patch: activar producto" -> handleProductoActivo(payload, true);
@@ -158,6 +163,8 @@ public class EventDispatcherService {
 
     private void handleUpsertProducto(JsonNode p) {
         Integer productCode = getInt(p, "productCode");
+        if (productCode == null) productCode = getInt(p, "product_code");
+        if (productCode == null) productCode = getInt(p, "code");
         if (productCode == null) return;
         Product prod = Optional.ofNullable(productRepository.findByProductCode(productCode)).orElseGet(Product::new);
         boolean creating = prod.getId() == null;
@@ -248,19 +255,30 @@ public class EventDispatcherService {
 
     // VENTAS
     public void handleSales(String normalizedType, JsonNode payload) {
+        // Compatibilidad: sin timestamp explícito
+        handleSales(normalizedType, payload, null);
+    }
+
+    public void handleSales(String normalizedType, JsonNode payload, OffsetDateTime eventTs) {
         switch (normalizedType) {
-            case "post: compra confirmada" -> handleCompraConfirmada(payload);
+            case "post: compra confirmada" -> handleCompraConfirmada(payload, eventTs);
             case "post: compra pendiente", "delete: compra cancelada" -> saveAnalyticsEvent(normalizedType, payload);
             case "post: review creada" -> handleReview(payload);
             case "post: producto agregado a favoritos" -> handleFavAdd(payload);
             case "delete: producto quitado de favoritos" -> handleFavRemove(payload);
-            case "get: vista diaria de productos" -> handleVistaDiaria(payload);
+            case "get: vista diaria de productos" -> handleVistaDiaria(payload, eventTs);
             case "post: stock rollback - compra cancelada", "stockrollback_cartcancelled" -> saveAnalyticsEvent(normalizedType, payload);
             default -> log.info("Evento ventas ignorado: {}", normalizedType);
         }
     }
 
+    @Transactional
     private void handleCompraConfirmada(JsonNode p) {
+        handleCompraConfirmada(p, null);
+    }
+
+    @Transactional // NUEVO overload con timestamp
+    private void handleCompraConfirmada(JsonNode p, OffsetDateTime eventTs) {
         if (p == null) return;
         // Usuario
         User user = null;
@@ -284,6 +302,7 @@ public class EventDispatcherService {
         // Carrito e ítems
         Cart cart = new Cart();
         cart.setUser(user);
+        List<CartItem> items = new ArrayList<>();
         if (p.has("cart") && p.get("cart").isObject()) {
             JsonNode c = p.get("cart");
             Integer externalId = getInt(c, "cartId");
@@ -293,7 +312,6 @@ public class EventDispatcherService {
             if (finalPrice == null) finalPrice = asFloat(c, "final_price");
             cart.setFinalPrice(finalPrice);
             if (c.has("items") && c.get("items").isArray()) {
-                List<CartItem> items = new ArrayList<>();
                 for (JsonNode it : c.get("items")) {
                     Integer productCode = getInt(it, "productCode");
                     if (productCode == null && it.has("product_code")) productCode = getInt(it, "product_code");
@@ -301,8 +319,15 @@ public class EventDispatcherService {
                     if (productCode == null || quantity == null) continue;
                     Product prod = productRepository.findByProductCode(productCode);
                     if (prod == null) {
-                        log.warn("Producto no encontrado productCode={}; se salta ítem", productCode);
-                        continue;
+                        // Placeholder si falta
+                        prod = new Product();
+                        prod.setProductCode(productCode);
+                        if (it.has("title")) prod.setTitle(asText(it, "title"));
+                        if (it.has("price")) prod.setPrice(asFloat(it, "price"));
+                        prod.setActive(true);
+                        prod.setStock(Optional.ofNullable(prod.getStock()).orElse(0));
+                        prod = productRepository.save(prod);
+                        log.info("Producto faltante creado on-the-fly productCode={}", productCode);
                     }
                     CartItem ci = new CartItem();
                     ci.setCart(cart);
@@ -310,15 +335,57 @@ public class EventDispatcherService {
                     ci.setQuantity(quantity);
                     items.add(ci);
                 }
-                cart.setItems(items);
             }
         }
+        cart.setItems(items);
+        if (cartRepository != null) {
+            cart = cartRepository.save(cart);
+        }
+
+        // Precargar stocks antiguos por código
+        java.util.Set<Integer> codes = new java.util.HashSet<>();
+        for (CartItem ci : items) {
+            if (ci.getProduct() != null && ci.getProduct().getProductCode() != null) {
+                codes.add(ci.getProduct().getProductCode());
+            }
+        }
+        java.util.Map<Integer, Integer> oldStockByCode = new java.util.HashMap<>();
+        if (!codes.isEmpty()) {
+            for (ProductRepository.CodeStock cs : productRepository.findByProductCodeIn(codes)) {
+                oldStockByCode.put(cs.getProductCode(), cs.getStock() == null ? 0 : cs.getStock());
+            }
+        }
+        for (Integer code : codes) oldStockByCode.putIfAbsent(code, 0);
+
+        // Descontar y loguear
+        for (CartItem ci : items) {
+            Product prod = ci.getProduct();
+            Integer productCode = prod.getProductCode();
+            int oldStock = oldStockByCode.getOrDefault(productCode, prod.getStock() != null ? prod.getStock() : 0);
+            int qty = ci.getQuantity() != null ? ci.getQuantity() : 0;
+            int newStock = Math.max(0, oldStock - qty);
+            prod.setStock(newStock);
+            productRepository.save(prod);
+            oldStockByCode.put(productCode, newStock);
+
+            StockChangeLog scl = new StockChangeLog();
+            scl.setProduct(prod);
+            scl.setOldStock(oldStock);
+            scl.setNewStock(newStock);
+            scl.setQuantityChanged(qty); // positivo
+            scl.setChangedAt(LocalDateTime.now());
+            scl.setReason("Venta - compra confirmada");
+            stockChangeLogRepository.save(scl);
+        }
+
         // Purchase
         Purchase purchase = new Purchase();
         purchase.setCart(cart);
         purchase.setUser(user);
         purchase.setStatus(Purchase.Status.CONFIRMED);
-        purchase.setDate(LocalDateTime.now());
+        LocalDateTime when = eventTs != null ? eventTs.toLocalDateTime() : LocalDateTime.now();
+        purchase.setDate(when);
+        // direction se deja null si no viene en el payload
         purchaseRepository.save(purchase);
         meterRegistry.counter("analytics.sales.purchase.confirmed").increment();
     }
@@ -396,25 +463,48 @@ public class EventDispatcherService {
         meterRegistry.counter("analytics.sales.fav", "op", "remove").increment();
     }
 
-    private void handleVistaDiaria(JsonNode p) {
-        if (p == null || !p.isArray()) return;
-        for (JsonNode n : p) {
+    private void handleVistaDiaria(JsonNode p, OffsetDateTime eventTs) {
+        if (p == null) return;
+        JsonNode arr = null;
+        if (p.has("views") && p.get("views").isArray()) {
+            arr = p.get("views");
+        } else if (p.isArray()) {
+            arr = p;
+        }
+        if (arr == null || !arr.isArray()) return;
+
+        int count = 0;
+        LocalDateTime fallbackTs = eventTs != null ? eventTs.toLocalDateTime() : LocalDateTime.now();
+        for (JsonNode n : arr) {
             Integer productCode = getInt(n, "productCode");
+            // viewedAt: si el payload trajera fecha, podría parsearse aquí; caso actual: usar timestamp del evento
+            LocalDateTime viewedAt = fallbackTs;
+
             View v = new View();
-            v.setViewedAt(LocalDateTime.now());
+            v.setViewedAt(viewedAt);
             v.setProductCode(productCode);
             if (productCode != null) {
                 Product prod = productRepository.findByProductCode(productCode);
                 if (prod != null) v.setProduct(prod);
             }
             viewRepository.save(v);
+            count++;
         }
-        meterRegistry.counter("analytics.sales.view.daily").increment(p.size());
+        meterRegistry.counter("analytics.sales.view.daily").increment(count);
     }
 
     // helpers
     private Integer getInt(JsonNode p, String field) {
-        return (p != null && p.has(field) && !p.get(field).isNull()) ? p.get(field).asInt() : null;
+        // Tolerante a strings numéricos
+        if (p != null && p.has(field) && !p.get(field).isNull()) {
+            try {
+                if (p.get(field).isTextual()) {
+                    return Integer.valueOf(p.get(field).asText());
+                }
+                return p.get(field).asInt();
+            } catch (Exception ignore) { return null; }
+        }
+        return null;
     }
     private Float asFloat(JsonNode p, String field) {
         return (p != null && p.has(field) && !p.get(field).isNull()) ? (float) p.get(field).asDouble() : null;

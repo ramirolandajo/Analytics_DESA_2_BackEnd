@@ -42,7 +42,7 @@ public class ConsumedEventLog {
     private Integer attempts;
 
     @Lob
-    @Column(name = "payload_json")
+    @Column(name = "payload_json", columnDefinition = "LONGTEXT")
     private String payloadJson;
 
     @Column(name = "processed_at")
@@ -60,7 +60,7 @@ public class ConsumedEventLog {
     private OffsetDateTime ackLastAt;
 
     @Lob
-    @Column(name = "ack_last_error")
+    @Column(name = "ack_last_error", columnDefinition = "LONGTEXT")
     private String ackLastError;
 
     public enum Status { PENDING, PROCESSED, ERROR }
