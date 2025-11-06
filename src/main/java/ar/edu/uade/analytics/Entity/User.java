@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.Setter;
 
+import java.util.Collection;
 import java.util.List;
 
 @Entity
@@ -113,4 +114,24 @@ public class User {
         this.accountActive = accountActive;
     }
 
+    public void setCarts(List<Cart> c) {
+        this.carts = c;
+    }
+
+    public void setFavouriteProducts(List<FavouriteProducts> favouriteProducts) {
+        this.favouriteProducts = favouriteProducts;
+
+    }
+
+    public List<Cart> getCarts() {
+        return carts;
+    }
+
+    public List<Purchase> getPurchases() {
+        return purchases;
+    }
+
+    public List<FavouriteProducts> getFavouriteProducts() {
+        return favouriteProducts;
+    }
 }

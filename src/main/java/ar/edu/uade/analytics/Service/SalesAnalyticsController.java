@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 public class SalesAnalyticsController {
 
     @Autowired
-    private PurchaseService purchaseService;
+    PurchaseService purchaseService;
 
     @Autowired
     private ar.edu.uade.analytics.Repository.StockChangeLogRepository stockChangeLogRepository;

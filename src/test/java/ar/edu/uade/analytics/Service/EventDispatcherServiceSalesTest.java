@@ -1,135 +1,118 @@
-//package ar.edu.uade.analytics.Service;
-//
-//import ar.edu.uade.analytics.Entity.*;
-//import ar.edu.uade.analytics.Repository.*;
-//import com.fasterxml.jackson.databind.JsonNode;
-//import com.fasterxml.jackson.databind.ObjectMapper;
-//import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-//import org.junit.jupiter.api.BeforeEach;
-//import org.junit.jupiter.api.Test;
-//import org.mockito.ArgumentCaptor;
-//
-//import java.util.Optional;
-//
-//import static org.assertj.core.api.Assertions.assertThat;
-//import static org.mockito.ArgumentMatchers.*;
-//import static org.mockito.Mockito.*;
-//
-//public class EventDispatcherServiceSalesTest {
-//
-//    private ObjectMapper mapper;
-//    private ProductRepository productRepository;
-//    private BrandRepository brandRepository;
-//    private CategoryRepository categoryRepository;
-//    private EventRepository eventRepository;
-//    private ReviewRepository reviewRepository;
-//    private FavouriteProductsRepository favouriteProductsRepository;
-//    private ViewRepository viewRepository;
-//    private PurchaseRepository purchaseRepository;
-//    private UserRepository userRepository;
-//    private StockChangeLogRepository stockChangeLogRepository;
-//
-//    private EventDispatcherService service;
-//
-//    @BeforeEach
-//    void setup() {
-//        mapper = new ObjectMapper();
-//        productRepository = mock(ProductRepository.class);
-//        brandRepository = mock(BrandRepository.class);
-//        categoryRepository = mock(CategoryRepository.class);
-//        eventRepository = mock(EventRepository.class);
-//        reviewRepository = mock(ReviewRepository.class);
-//        favouriteProductsRepository = mock(FavouriteProductsRepository.class);
-//        viewRepository = mock(ViewRepository.class);
-//        purchaseRepository = mock(PurchaseRepository.class);
-//        userRepository = mock(UserRepository.class);
-//        stockChangeLogRepository = mock(StockChangeLogRepository.class);
-//
-//        service = new EventDispatcherService(
-//                mapper,
-//                productRepository,
-//                brandRepository,
-//                categoryRepository,
-//                eventRepository,
-//                reviewRepository,
-//                favouriteProductsRepository,
-//                viewRepository,
-//                purchaseRepository,
-//                userRepository,
-//                new SimpleMeterRegistry(),
-//                stockChangeLogRepository
-//        );
-//    }
-//
-//    @Test
-//    void compraConfirmada_creaUsuarioCarritoItemsYCompra() throws Exception {
-//        String json = """
-//        {
-//        	"eventId": "d6d93e55-a1fd-4fdf-b565-1af91a4cdf45",
-//        	"eventType": "POST: Compra confirmada",
-//        	"timestamp": 1759923314.084080900,
-//        	"originModule": "Ventas",
-//        	"payload": {
-//        		"purchaseId": 15,
-//        		"user": {
-//        			"name": "Enzo",
-//        			"id": 7,
-//        			"email": "asplanattienzo@gmail.com"
-//        		},
-//        		"cart": {
-//        			"cartId": 15,
-//        			"finalPrice": 3896.07,
-//        			"items": [
-//        				{
-//        					"productCode": 10016,
-//        					"quantity": 3,
-//        					"price": 1215.0,
-//        					"id": 18,
-//        					"title": "Notebook Profesional X1"
-//        				},
-//        				{
-//        					"productCode": 10017,
-//        					"quantity": 3,
-//        					"price": 83.69,
-//        					"id": 19,
-//        					"title": "Auriculares Gamer Pro"
-//        				}
-//        			]
-//        		},
-//        		"status": "CONFIRMED"
-//        	}
-//        }
-//        """;
-//        JsonNode node = mapper.readTree(json).get("payload");
-//
-//        // Stubs: no existe el usuario, existen 2 productos por productCode
-//        when(userRepository.findByEmail("asplanattienzo@gmail.com")).thenReturn(null);
-//        when(userRepository.save(any(User.class))).thenAnswer(inv -> {
-//            User u = inv.getArgument(0);
-//            // simular id generado
-//            u.setId(1);
-//            return u;
-//        });
-//        Product p1 = new Product(); p1.setId(11); p1.setProductCode(10016);
-//        Product p2 = new Product(); p2.setId(12); p2.setProductCode(10017);
-//        when(productRepository.findByProductCode(10016)).thenReturn(p1);
-//        when(productRepository.findByProductCode(10017)).thenReturn(p2);
-//
-//        ArgumentCaptor<Purchase> purchaseCaptor = ArgumentCaptor.forClass(Purchase.class);
-//        when(purchaseRepository.save(purchaseCaptor.capture())).thenAnswer(inv -> inv.getArgument(0));
-//
-//        service.handleSales("post: compra confirmada", node);
-//
-//        Purchase saved = purchaseCaptor.getValue();
-//        assertThat(saved).isNotNull();
-//        assertThat(saved.getUser()).isNotNull();
-//        assertThat(saved.getUser().getEmail()).isEqualTo("asplanattienzo@gmail.com");
-//        assertThat(saved.getCart()).isNotNull();
-//        assertThat(saved.getCart().getExternalCartId()).isEqualTo(15);
-//        assertThat(saved.getCart().getFinalPrice()).isEqualTo(3896.07f);
-//        assertThat(saved.getCart().getItems()).hasSize(2);
-//        assertThat(saved.getCart().getItems().get(0).getProduct().getProductCode()).isEqualTo(10016);
-//        assertThat(saved.getCart().getItems().get(1).getProduct().getProductCode()).isEqualTo(10017);
-//    }
-//}
-//
+package ar.edu.uade.analytics.Service;
+
+import ar.edu.uade.analytics.Entity.*;
+import ar.edu.uade.analytics.Repository.*;
+import ar.edu.uade.analytics.TestHelpers.TestUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+
+import java.time.OffsetDateTime;
+import java.util.*;
+
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+class EventDispatcherServiceSalesTest {
+    @Mock ProductRepository productRepository;
+    @Mock BrandRepository brandRepository;
+    @Mock CategoryRepository categoryRepository;
+    @Mock EventRepository eventRepository;
+    @Mock ReviewRepository reviewRepository;
+    @Mock FavouriteProductsRepository favouriteProductsRepository;
+    @Mock ViewRepository viewRepository;
+    @Mock PurchaseRepository purchaseRepository;
+    @Mock UserRepository userRepository;
+    MeterRegistry meterRegistry = TestUtils.mockMeterRegistryWithCounter();
+    @Mock StockChangeLogRepository stockChangeLogRepository;
+    @Mock CartRepository cartRepository;
+    Counter counter;
+
+    EventDispatcherService svc;
+    ObjectMapper mapper = new ObjectMapper();
+
+    @Captor ArgumentCaptor<Purchase> purchaseCaptor;
+
+    @BeforeEach
+    void setUp() {
+        svc = new EventDispatcherService(mapper,
+                productRepository,
+                brandRepository,
+                categoryRepository,
+                eventRepository,
+                reviewRepository,
+                favouriteProductsRepository,
+                view_repository(),
+                purchaseRepository,
+                userRepository,
+                meterRegistry,
+                stockChangeLogRepository,
+                cart_repository());
+        counter = meterRegistry.counter("analytics.sales.views");
+    }
+
+    private ViewRepository view_repository(){ return viewRepository; }
+    private CartRepository cart_repository(){ return cartRepository; }
+
+    @Test
+    void handleCompraConfirmada_createsMissingProduct_and_savesPurchase() {
+        ObjectNode p = mapper.createObjectNode();
+        ObjectNode user = mapper.createObjectNode(); user.put("email","u@example.com"); user.put("name","U");
+        p.set("user", user);
+        ObjectNode cart = mapper.createObjectNode(); cart.put("cartId", 1);
+        ArrayNode items = mapper.createArrayNode();
+        ObjectNode it = mapper.createObjectNode(); it.put("productCode", 777); it.put("quantity", 2); it.put("title","NewProd"); it.put("price", 9.5);
+        items.add(it);
+        ObjectNode cartObj = mapper.createObjectNode(); cartObj.set("items", items); cartObj.put("finalPrice", 19.0);
+        p.set("cart", cartObj);
+
+        when(userRepository.findByEmail("u@example.com")).thenReturn(null);
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> { User u = inv.getArgument(0); u.setId(10); return u; });
+        when(productRepository.findByProductCode(777)).thenReturn(null);
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> { Product pr = inv.getArgument(0); pr.setId(55); return pr; });
+        when(productRepository.findByProductCodeIn(anySet())).thenReturn(Collections.emptyList());
+        when(cartRepository.save(any(Cart.class))).thenAnswer(inv -> { Cart c = inv.getArgument(0); c.setId(2); return c; });
+
+        svc.handleSales("post: compra confirmada", p, OffsetDateTime.now());
+
+        verify(productRepository, times(2)).save(any(Product.class));
+        verify(purchaseRepository).save(purchaseCaptor.capture());
+        assertNotNull(purchaseCaptor.getValue());
+        assertEquals(Purchase.Status.CONFIRMED, purchaseCaptor.getValue().getStatus());
+    }
+
+    @Test
+    void handleCompraConfirmada_ignores_whenNoUserInPayload() {
+        ObjectNode p = mapper.createObjectNode();
+        svc.handleSales("post: compra confirmada", p, null);
+        verify(purchaseRepository, never()).save(any());
+    }
+
+    @Test
+    void handleVistaDiaria_savesViews_forArrayPayload() {
+        ArrayNode arr = mapper.createArrayNode();
+        ObjectNode v1 = mapper.createObjectNode(); v1.put("productCode", 100);
+        ObjectNode v2 = mapper.createObjectNode(); v2.putNull("productCode");
+        arr.add(v1); arr.add(v2);
+        when(productRepository.findByProductCode(100)).thenReturn(new Product());
+        when(viewRepository.save(any(View.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        svc.handleSales("get: vista diaria de productos", arr, null);
+
+        verify(viewRepository, times(2)).save(any(View.class));
+        verify(counter).increment(anyDouble());
+    }
+}

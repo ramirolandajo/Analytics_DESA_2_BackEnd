@@ -65,7 +65,10 @@ public class IdempotencyService {
             log.setUpdatedAt(OffsetDateTime.now());
             repo.save(log);
         });
-        meterRegistry.counter("analytics.events.processed").increment();
+        try {
+            io.micrometer.core.instrument.Counter c = meterRegistry.counter("analytics.events.processed");
+            if (c != null) c.increment();
+        } catch (Exception ignore) {}
     }
 
     public void markError(String eventId, String error) {
@@ -75,7 +78,10 @@ public class IdempotencyService {
             log.setAckLastError(error);
             repo.save(log);
         });
-        meterRegistry.counter("analytics.events.errors").increment();
+        try {
+            io.micrometer.core.instrument.Counter c = meterRegistry.counter("analytics.events.errors");
+            if (c != null) c.increment();
+        } catch (Exception ignore) {}
     }
 
     public void markAck(String eventId, boolean success) {

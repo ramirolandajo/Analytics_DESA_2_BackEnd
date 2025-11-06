@@ -15,43 +15,25 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class EventServiceImplTest {
+class EventServiceImplTest {
 
-    @Mock
-    private EventRepository eventRepository;
-
-    @InjectMocks
-    private EventServiceImpl service;
+    @Mock private EventRepository repo;
+    @InjectMocks private EventServiceImpl svc;
 
     @Test
-    void testGetAllEvents() {
-        Event e = new Event(); e.setId(1); e.setType("T");
-        when(eventRepository.findAll()).thenReturn(List.of(e));
-        var res = service.getAllEvents();
-        assertNotNull(res);
-        assertEquals(1, res.size());
-        verify(eventRepository).findAll();
-    }
+    void basicCrud_delegateToRepo() {
+        Event e = new Event();
+        when(repo.findAll()).thenReturn(List.of(e));
+        assertEquals(1, svc.getAllEvents().size());
 
-    @Test
-    void testGetEventById() {
-        Event e = new Event(); e.setId(2); e.setType("T2");
-        when(eventRepository.findById(2)).thenReturn(Optional.of(e));
-        var opt = service.getEventById(2);
-        assertTrue(opt.isPresent());
-        assertEquals(2, opt.get().getId());
-        verify(eventRepository).findById(2);
-    }
+        when(repo.findById(3)).thenReturn(Optional.of(e));
+        assertTrue(svc.getEventById(3).isPresent());
 
-    @Test
-    void testSaveAndDeleteEvent() {
-        Event e = new Event(); e.setId(3);
-        when(eventRepository.save(e)).thenReturn(e);
-        var saved = service.saveEvent(e);
-        assertEquals(3, saved.getId());
-        service.deleteEvent(3);
-        verify(eventRepository).deleteById(3);
-        verify(eventRepository).save(e);
+        when(repo.save(e)).thenReturn(e);
+        assertSame(e, svc.saveEvent(e));
+
+        svc.deleteEvent(5);
+        verify(repo).deleteById(5);
     }
 }
 

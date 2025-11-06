@@ -25,11 +25,18 @@ public class AEDServiceImpl implements AEDService {
         for (Purchase purchase : purchases) {
             if (purchase.getCart() != null && purchase.getCart().getItems() != null) {
                 for (CartItem item : purchase.getCart().getItems()) {
-                    purchaseId.append(purchase.getId());
-                    finalPrice.append(purchase.getCart().getFinalPrice() != null ? purchase.getCart().getFinalPrice() : 0.0);
-                    productId.append(item.getProduct().getId());
-                    quantity.append(item.getQuantity() != null ? item.getQuantity() : 0);
-                    status.append(purchase.getStatus().name());
+                    // defensivo: evitar NPE si purchase id o producto son null
+                    int pid = 0;
+                    if (item != null && item.getProduct() != null && item.getProduct().getId() != null) pid = item.getProduct().getId();
+                    int pId = purchase.getId() != null ? purchase.getId() : 0;
+                    double fp = purchase.getCart().getFinalPrice() != null ? purchase.getCart().getFinalPrice() : 0.0;
+                    int qty = item != null && item.getQuantity() != null ? item.getQuantity() : 0;
+                    String st = purchase.getStatus() != null ? purchase.getStatus().name() : "UNKNOWN";
+                    purchaseId.append(pId);
+                    finalPrice.append(fp);
+                    productId.append(pid);
+                    quantity.append(qty);
+                    status.append(st);
                 }
             }
         }
@@ -118,9 +125,19 @@ public class AEDServiceImpl implements AEDService {
             double iqr = q3 - q1;
             double lower = q1 - 1.5 * iqr;
             double upper = q3 + 1.5 * iqr;
+            // compute median for an auxiliary rule
+            double median = finalPrice.median();
             List<Double> outliers = new java.util.ArrayList<>();
             for (double v : finalPrice.asDoubleArray()) {
-                if (v < lower || v > upper) outliers.add(v);
+                // IQR rule
+                if (v < lower || v > upper) {
+                    outliers.add(v);
+                    continue;
+                }
+                // auxiliary rule: mark as outlier when value is vastly larger than the median
+                if (median > 0 && v > median * 10) {
+                    outliers.add(v);
+                }
             }
             result.put("outliers_finalPrice", outliers);
             result.put("lowerBound", lower);

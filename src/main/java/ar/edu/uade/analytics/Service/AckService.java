@@ -39,8 +39,14 @@ public class AckService {
         CoreApiClient.AckResponse resp = null;
         boolean success = false;
         for (int attempt = 1; attempt <= Math.max(1, immediateRetries); attempt++) {
-            resp = coreApiClient.ackEvent(eventId, consumedAt);
-            if (resp.ok()) {
+            try {
+                resp = coreApiClient.ackEvent(eventId, consumedAt);
+            } catch (Exception e) {
+                // defensa: si el cliente lanza excepción, lo tratamos como fallo y seguimos reintentando
+                log.debug("coreApiClient.ackEvent threw an exception on attempt {}: {}", attempt, e.getMessage());
+                resp = null;
+            }
+            if (resp != null && resp.ok()) {
                 success = true;
                 break;
             }
@@ -63,4 +69,3 @@ public class AckService {
         }
     }
 }
-

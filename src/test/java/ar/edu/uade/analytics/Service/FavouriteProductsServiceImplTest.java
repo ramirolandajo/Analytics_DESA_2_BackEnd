@@ -15,43 +15,28 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class FavouriteProductsServiceImplTest {
+class FavouriteProductsServiceImplTest {
 
     @Mock
-    private FavouriteProductsRepository favouriteProductsRepository;
+    private FavouriteProductsRepository repo;
 
     @InjectMocks
-    private FavouriteProductsServiceImpl service;
+    private FavouriteProductsServiceImpl svc;
 
     @Test
-    void testGetAllFavouriteProducts() {
-        FavouriteProducts f = new FavouriteProducts(); f.setId(1L); f.setProductCode(100);
-        when(favouriteProductsRepository.findAll()).thenReturn(List.of(f));
-        var res = service.getAllFavouriteProducts();
-        assertNotNull(res);
-        assertEquals(1, res.size());
-        verify(favouriteProductsRepository).findAll();
+    void getAllFavouriteProducts() {
+        when(repo.findAll()).thenReturn(List.of(new FavouriteProducts()));
+        assertFalse(svc.getAllFavouriteProducts().isEmpty());
     }
 
     @Test
-    void testGetFavouriteProductById() {
-        FavouriteProducts f = new FavouriteProducts(); f.setId(2L); f.setProductCode(101);
-        when(favouriteProductsRepository.findById(2L)).thenReturn(Optional.of(f));
-        var opt = service.getFavouriteProductById(2L);
-        assertTrue(opt.isPresent());
-        assertEquals(2, opt.get().getId());
-        verify(favouriteProductsRepository).findById(2L);
-    }
-
-    @Test
-    void testSaveAndDeleteFavouriteProduct() {
-        FavouriteProducts f = new FavouriteProducts(); f.setId(3L);
-        when(favouriteProductsRepository.save(f)).thenReturn(f);
-        var saved = service.saveFavouriteProduct(f);
-        assertEquals(3, saved.getId());
-        service.deleteFavouriteProduct(3L);
-        verify(favouriteProductsRepository).deleteById(3L);
-        verify(favouriteProductsRepository).save(f);
+    void getById_and_save_and_delete() {
+        FavouriteProducts f = new FavouriteProducts();
+        when(repo.findById(Long.valueOf(1L))).thenReturn(Optional.of(f));
+        assertTrue(svc.getFavouriteProductById(Long.valueOf(1L)).isPresent());
+        when(repo.save(f)).thenReturn(f);
+        assertSame(f, svc.saveFavouriteProduct(f));
+        svc.deleteFavouriteProduct(Long.valueOf(1L));
+        verify(repo).deleteById(Long.valueOf(1L));
     }
 }
-

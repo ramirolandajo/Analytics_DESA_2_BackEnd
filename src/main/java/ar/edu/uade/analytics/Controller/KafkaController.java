@@ -22,16 +22,16 @@ import java.util.Optional;
 public class KafkaController {
 
     @Autowired
-    private EventService eventService;
+    EventService eventService;
     @Autowired
-    private CartService cartService;
+    CartService cartService;
     @Autowired
-    private ProductService productService;
+    ProductService productService;
     @Autowired
-    private ObjectMapper objectMapper;
+    ObjectMapper objectMapper;
 
     @Autowired
-    private ar.edu.uade.analytics.Service.PurchaseService purchaseService;
+    ar.edu.uade.analytics.Service.PurchaseService purchaseService;
 
     @PostMapping("/event")
     public ResponseEntity<String> receiveEvent(@RequestBody String eventJson) {
