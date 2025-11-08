@@ -38,7 +38,7 @@ public class SalesEventsListener {
         this.ackService = ackService;
     }
 
-    @KafkaListener(topics = "${analitica.kafka.ventas.topic:ventas}", containerFactory = "kafkaListenerContainerFactory", concurrency = "${analitica.kafka.ventas.concurrency:1}")
+    @KafkaListener(topics = "${analitica.kafka.ventas.topic}", concurrency = "${analitica.kafka.ventas.concurrency:1}")
     public void onMessage(ConsumerRecord<String, EventMessage> record) {
         EventMessage msg = record.value();
         if (msg == null) {
