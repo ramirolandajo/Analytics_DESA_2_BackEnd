@@ -36,7 +36,7 @@ public class InventoryEventsListener {
         this.ackService = ackService;
     }
 
-    @KafkaListener(topics = "${analitica.kafka.inventario.topic}", concurrency = "${analitica.kafka.inventario.concurrency:1}")
+    @KafkaListener(topics = "${analitica.kafka.inventario.topic:inventario}", concurrency = "${analitica.kafka.inventario.concurrency:1}")
     public void onMessage(ConsumerRecord<String, EventMessage> record) {
         EventMessage msg = record.value();
         if (msg == null) {
