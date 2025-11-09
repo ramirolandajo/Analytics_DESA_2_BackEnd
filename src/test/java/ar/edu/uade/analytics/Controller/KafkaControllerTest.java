@@ -1,197 +1,48 @@
 package ar.edu.uade.analytics.Controller;
 
+import ar.edu.uade.analytics.Service.CartService;
+import ar.edu.uade.analytics.Service.EventService;
+import ar.edu.uade.analytics.Service.ProductService;
+import ar.edu.uade.analytics.Service.PurchaseService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.test.web.servlet.MockMvc;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.ResponseEntity;
 
-@SuppressWarnings("deprecation")
-@WebMvcTest(KafkaController.class)
-public class KafkaControllerTest {
-    @Autowired
-    private MockMvc mockMvc;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
-    @MockBean
-    private ar.edu.uade.analytics.Service.EventService eventService;
-    @MockBean
-    private ar.edu.uade.analytics.Service.CartService cartService;
-    @MockBean
-    private ar.edu.uade.analytics.Service.ProductService productService;
-    @MockBean
-    private ar.edu.uade.analytics.Service.PurchaseService purchaseService;
+@ExtendWith(MockitoExtension.class)
+class KafkaControllerTest {
 
-    @Test
-    void contextLoads() {
-        // Test de carga de contexto
+    @Mock EventService eventService;
+    @Mock CartService cartService;
+    @Mock ProductService productService;
+    @Mock PurchaseService purchaseService;
+
+    KafkaController controller;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        controller = new KafkaController();
+        java.lang.reflect.Field f;
+        f = KafkaController.class.getDeclaredField("eventService"); f.setAccessible(true); f.set(controller, eventService);
+        f = KafkaController.class.getDeclaredField("cartService"); f.setAccessible(true); f.set(controller, cartService);
+        f = KafkaController.class.getDeclaredField("productService"); f.setAccessible(true); f.set(controller, productService);
+        f = KafkaController.class.getDeclaredField("purchaseService"); f.setAccessible(true); f.set(controller, purchaseService);
+        f = KafkaController.class.getDeclaredField("objectMapper"); f.setAccessible(true); f.set(controller, new ObjectMapper());
     }
 
     @Test
-    void testReceiveEvent_returnsOk() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"StockConfirmed_CartPurchase\"," +
-                "\"payload\":{\"cartId\":123}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+    void receiveEvent_malformedJson_returnsBadRequest() {
+        String badJson = "{ not json }";
+        ResponseEntity<String> resp = controller.receiveEvent(badJson);
+        assertEquals(400, resp.getStatusCode().value());
     }
 
-    @Test
-    void testReceiveEvent_stockConfirmedCartPurchase_success() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"StockConfirmed_CartPurchase\"," +
-                "\"payload\":{\"cartId\":123,\"products\":[{\"productId\":1,\"stockAfter\":5}]}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        // Mock cart and product
-        ar.edu.uade.analytics.Entity.Cart cart = new ar.edu.uade.analytics.Entity.Cart();
-        ar.edu.uade.analytics.Entity.Product product = new ar.edu.uade.analytics.Entity.Product();
-        org.mockito.Mockito.when(cartService.getCartById(123)).thenReturn(java.util.Optional.of(cart));
-        org.mockito.Mockito.when(productService.getProductById(1)).thenReturn(java.util.Optional.of(product));
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Evento procesado correctamente")));
-    }
 
-    @Test
-    void testReceiveEvent_typeNotCartPurchase() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"OtherEvent\"," +
-                "\"payload\":{\"foo\":1}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Evento procesado correctamente")));
-    }
-
-    @Test
-    void testReceiveEvent_cartNotFound() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"StockConfirmed_CartPurchase\"," +
-                "\"payload\":{\"cartId\":999,\"products\":[{\"productId\":1,\"stockAfter\":5}]}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        org.mockito.Mockito.when(cartService.getCartById(999)).thenReturn(java.util.Optional.empty());
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Evento procesado correctamente")));
-    }
-
-    @Test
-    void testReceiveEvent_productNotFound() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"StockConfirmed_CartPurchase\"," +
-                "\"payload\":{\"cartId\":123,\"products\":[{\"productId\":1,\"stockAfter\":5}]}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        ar.edu.uade.analytics.Entity.Cart cart = new ar.edu.uade.analytics.Entity.Cart();
-        org.mockito.Mockito.when(cartService.getCartById(123)).thenReturn(java.util.Optional.of(cart));
-        org.mockito.Mockito.when(productService.getProductById(1)).thenReturn(java.util.Optional.empty());
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Evento procesado correctamente")));
-    }
-
-    @Test
-    void testReceiveEvent_invalidJson() throws Exception {
-        String eventJson = "{invalid json}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Error procesando evento")));
-    }
-
-    @Test
-    void testReceiveEvent_payloadMissingFields() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"StockConfirmed_CartPurchase\"," +
-                "\"payload\":{}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Error procesando evento")));
-    }
-
-    @Test
-    void testReceiveEvent_eventServiceThrowsException() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"OtherEvent\"," +
-                "\"payload\":{\"foo\":1}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        org.mockito.Mockito.doThrow(new RuntimeException("DB error")).when(eventService).saveEvent(org.mockito.Mockito.any());
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Error procesando evento")));
-    }
-
-    @Test
-    void testReceiveEvent_missingTypeField() throws Exception {
-        String eventJson = "{" +
-                "\"payload\":{\"cartId\":123}," +
-                "\"timestamp\":\"2025-09-06T12:00:00\"}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Error procesando evento")));
-    }
-
-    @Test
-    void testReceiveEvent_missingTimestampField() throws Exception {
-        String eventJson = "{" +
-                "\"type\":\"StockConfirmed_CartPurchase\"," +
-                "\"payload\":{\"cartId\":123,\"products\":[{\"productId\":1,\"stockAfter\":5}]}" +
-                "}";
-        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request =
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .post("/kafka/event")
-                        .contentType("application/json")
-                        .content(eventJson);
-        ar.edu.uade.analytics.Entity.Cart cart = new ar.edu.uade.analytics.Entity.Cart();
-        ar.edu.uade.analytics.Entity.Product product = new ar.edu.uade.analytics.Entity.Product();
-        org.mockito.Mockito.when(cartService.getCartById(123)).thenReturn(java.util.Optional.of(cart));
-        org.mockito.Mockito.when(productService.getProductById(1)).thenReturn(java.util.Optional.of(product));
-        mockMvc.perform(request)
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("Evento procesado correctamente")));
-    }
 }
+

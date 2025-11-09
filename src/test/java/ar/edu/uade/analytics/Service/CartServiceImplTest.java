@@ -15,43 +15,24 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class CartServiceImplTest {
+class CartServiceImplTest {
 
     @Mock
     private CartRepository cartRepository;
 
     @InjectMocks
-    private CartServiceImpl service;
+    private CartServiceImpl cartService;
 
     @Test
-    void testGetAllCarts() {
-        Cart c = new Cart(); c.setId(1);
-        when(cartRepository.findAll()).thenReturn(List.of(c));
-        var res = service.getAllCarts();
-        assertNotNull(res);
-        assertEquals(1, res.size());
-        verify(cartRepository).findAll();
-    }
-
-    @Test
-    void testGetCartById() {
-        Cart c = new Cart(); c.setId(2);
-        when(cartRepository.findById(2)).thenReturn(Optional.of(c));
-        var opt = service.getCartById(2);
-        assertTrue(opt.isPresent());
-        assertEquals(2, opt.get().getId());
-        verify(cartRepository).findById(2);
-    }
-
-    @Test
-    void testSaveAndDeleteCart() {
-        Cart c = new Cart(); c.setId(3);
+    void basicCRUD() {
+        when(cartRepository.findAll()).thenReturn(List.of(new Cart()));
+        assertFalse(cartService.getAllCarts().isEmpty());
+        Cart c = new Cart();
+        when(cartRepository.findById(Integer.valueOf(1))).thenReturn(Optional.of(c));
+        assertTrue(cartService.getCartById(Integer.valueOf(1)).isPresent());
         when(cartRepository.save(c)).thenReturn(c);
-        var saved = service.saveCart(c);
-        assertEquals(3, saved.getId());
-        service.deleteCart(3);
-        verify(cartRepository).deleteById(3);
-        verify(cartRepository).save(c);
+        assertSame(c, cartService.saveCart(c));
+        cartService.deleteCart(Integer.valueOf(1));
+        verify(cartRepository).deleteById(Integer.valueOf(1));
     }
 }
-

@@ -16,6 +16,9 @@ public class Category {
     @Column
     private String name;
 
+    @Column(unique = true)
+    private Integer categoryCode;
+
     @Column(nullable = false)
     private boolean active;
 

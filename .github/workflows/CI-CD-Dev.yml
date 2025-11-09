@@ -63,11 +63,10 @@ jobs:
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v21
         with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
-          application_name: "Analytics Dev"
-          environment_name: Analytics-dev-env
-          existing_bucket_name: analytics-dev-backend-bucket
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: analytics-dev-app
+          environment_name: analytics-dev-env
           version_label: ${{ env.VERSION_LABEL }}
           region: sa-east-1
           deployment_package: ./artifact/app.jar

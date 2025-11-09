@@ -9,27 +9,29 @@ import ar.edu.uade.analytics.Service.ProductService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+@ConditionalOnProperty(value = "analytics.mock.enabled", havingValue = "true", matchIfMissing = true)
 @RestController
 @RequestMapping("/kafka")
 public class KafkaController {
 
     @Autowired
-    private EventService eventService;
+    EventService eventService;
     @Autowired
-    private CartService cartService;
+    CartService cartService;
     @Autowired
-    private ProductService productService;
+    ProductService productService;
     @Autowired
-    private ObjectMapper objectMapper;
+    ObjectMapper objectMapper;
 
     @Autowired
-    private ar.edu.uade.analytics.Service.PurchaseService purchaseService;
+    ar.edu.uade.analytics.Service.PurchaseService purchaseService;
 
     @PostMapping("/event")
     public ResponseEntity<String> receiveEvent(@RequestBody String eventJson) {

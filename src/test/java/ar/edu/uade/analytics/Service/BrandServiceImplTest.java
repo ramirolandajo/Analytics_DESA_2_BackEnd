@@ -15,43 +15,43 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class BrandServiceImplTest {
+class BrandServiceImplTest {
 
     @Mock
     private BrandRepository brandRepository;
 
     @InjectMocks
-    private BrandServiceImpl service;
+    private BrandServiceImpl brandService;
 
     @Test
-    void testGetAllBrands() {
-        Brand b = new Brand(); b.setId(1); b.setName("B1");
-        when(brandRepository.findAll()).thenReturn(List.of(b));
-        var res = service.getAllBrands();
-        assertNotNull(res);
-        assertEquals(1, res.size());
+    void getAllBrands_delegatesToRepository() {
+        List<Brand> expected = List.of(new Brand());
+        when(brandRepository.findAll()).thenReturn(expected);
+        assertEquals(expected, brandService.getAllBrands());
         verify(brandRepository).findAll();
     }
 
     @Test
-    void testGetBrandById() {
-        Brand b = new Brand(); b.setId(2); b.setName("B2");
-        when(brandRepository.findById(2)).thenReturn(Optional.of(b));
-        var opt = service.getBrandById(2);
-        assertTrue(opt.isPresent());
-        assertEquals(2, opt.get().getId());
-        verify(brandRepository).findById(2);
+    void getBrandById_delegatesToRepository() {
+        Brand b = new Brand();
+        when(brandRepository.findById(Integer.valueOf(1))).thenReturn(Optional.of(b));
+        Optional<Brand> res = brandService.getBrandById(Integer.valueOf(1));
+        assertTrue(res.isPresent());
+        assertSame(b, res.get());
+        verify(brandRepository).findById(Integer.valueOf(1));
     }
 
     @Test
-    void testSaveAndDeleteBrand() {
-        Brand b = new Brand(); b.setId(3);
+    void saveBrand_delegatesToRepository() {
+        Brand b = new Brand();
         when(brandRepository.save(b)).thenReturn(b);
-        var saved = service.saveBrand(b);
-        assertEquals(3, saved.getId());
-        service.deleteBrand(3);
-        verify(brandRepository).deleteById(3);
+        assertSame(b, brandService.saveBrand(b));
         verify(brandRepository).save(b);
     }
-}
 
+    @Test
+    void deleteBrand_delegatesToRepository() {
+        brandService.deleteBrand(Integer.valueOf(5));
+        verify(brandRepository).deleteById(Integer.valueOf(5));
+    }
+}

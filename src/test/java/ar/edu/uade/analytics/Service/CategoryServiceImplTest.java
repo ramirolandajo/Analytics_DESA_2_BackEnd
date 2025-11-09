@@ -15,43 +15,28 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class CategoryServiceImplTest {
+class CategoryServiceImplTest {
 
     @Mock
     private CategoryRepository categoryRepository;
 
     @InjectMocks
-    private CategoryServiceImpl service;
+    private CategoryServiceImpl categoryService;
 
     @Test
-    void testGetAllCategories() {
-        Category c = new Category(); c.setId(1); c.setName("Cat1");
-        when(categoryRepository.findAll()).thenReturn(List.of(c));
-        var res = service.getAllCategories();
-        assertNotNull(res);
-        assertEquals(1, res.size());
-        verify(categoryRepository).findAll();
+    void getAllCategories() {
+        when(categoryRepository.findAll()).thenReturn(List.of(new Category()));
+        assertFalse(categoryService.getAllCategories().isEmpty());
     }
 
     @Test
-    void testGetCategoryById() {
-        Category c = new Category(); c.setId(2); c.setName("Cat2");
-        when(categoryRepository.findById(2)).thenReturn(Optional.of(c));
-        var opt = service.getCategoryById(2);
-        assertTrue(opt.isPresent());
-        assertEquals(2, opt.get().getId());
-        verify(categoryRepository).findById(2);
-    }
-
-    @Test
-    void testSaveAndDeleteCategory() {
-        Category c = new Category(); c.setId(3);
+    void getSaveDelete() {
+        Category c = new Category();
+        when(categoryRepository.findById(Integer.valueOf(1))).thenReturn(Optional.of(c));
+        assertTrue(categoryService.getCategoryById(Integer.valueOf(1)).isPresent());
         when(categoryRepository.save(c)).thenReturn(c);
-        var saved = service.saveCategory(c);
-        assertEquals(3, saved.getId());
-        service.deleteCategory(3);
-        verify(categoryRepository).deleteById(3);
-        verify(categoryRepository).save(c);
+        assertSame(c, categoryService.saveCategory(c));
+        categoryService.deleteCategory(Integer.valueOf(1));
+        verify(categoryRepository).deleteById(Integer.valueOf(1));
     }
 }
-

@@ -119,4 +119,8 @@ public class Product {
     public void setFeatured(boolean b) {
         this.isFeatured = b;
     }
+
+    public void setName(String x) {
+        this.title = x;
+    }
 }
