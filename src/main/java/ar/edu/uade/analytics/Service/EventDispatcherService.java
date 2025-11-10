@@ -164,7 +164,7 @@ public class EventDispatcherService {
 
     void handleUpsertProducto(JsonNode p) {
         Integer productCode = getInt(p, "productCode");
-        if (productCode == null) productCode = getInt(p, "product_code");
+        if (productCode == null) productCode = getInt(p, "product_code"); // alias adicional
         if (productCode == null) productCode = getInt(p, "code");
         if (productCode == null) return;
         Product prod = Optional.ofNullable(productRepository.findByProductCode(productCode)).orElseGet(Product::new);
@@ -180,21 +180,21 @@ public class EventDispatcherService {
         if (p.has("calification")) prod.setCalification(asFloat(p, "calification"));
         if (p.has("images") && p.get("images").isArray()) {
             List<String> imgs = new ArrayList<>();
-            for (JsonNode n : p.get("images")) {
-                imgs.add(n.asText());
-            }
+            for (JsonNode n : p.get("images")) imgs.add(n.asText());
             prod.setMediaSrc(imgs);
         }
+        // flags con sinonimos
         if (p.has("new")) prod.setNew(p.get("new").asBoolean());
+        else if (p.has("is_new")) prod.setNew(p.get("is_new").asBoolean());
         if (p.has("bestSeller")) prod.setBestseller(p.get("bestSeller").asBoolean());
+        else if (p.has("is_best_seller")) prod.setBestseller(p.get("is_best_seller").asBoolean());
         if (p.has("featured")) prod.setFeatured(p.get("featured").asBoolean());
+        else if (p.has("is_featured")) prod.setFeatured(p.get("is_featured").asBoolean());
         if (p.has("hero")) prod.setHero(p.get("hero").asBoolean());
         if (p.has("active")) prod.setActive(p.get("active").asBoolean());
 
-        // Resolver brand
-        Brand brand = resolveBrand(p);
+        Brand brand = resolveBrand(p); // soporta brandCode o brand
         if (brand != null) prod.setBrand(brand);
-        // Resolver categorías
         Set<Category> categories = resolveCategories(p);
         if (!categories.isEmpty()) prod.setCategories(categories);
 
@@ -405,34 +405,28 @@ public class EventDispatcherService {
 
     private void handleReview(JsonNode p) {
         Review r = new Review();
-        // rating: aceptar varias claves
         Float rating = null;
         if (p.has("rateUpdated")) rating = asFloat(p, "rateUpdated");
+        else if (p.has("rate_updated")) rating = asFloat(p, "rate_updated"); // alias snake_case
         else if (p.has("rating")) rating = asFloat(p, "rating");
         else if (p.has("calification")) rating = asFloat(p, "calification");
         if (rating == null) rating = 0.0f;
         r.setCalification(rating);
 
-        // descripción: aceptar varias claves
         String desc = null;
         if (p.has("message")) desc = asText(p, "message");
         else if (p.has("description")) desc = asText(p, "description");
         else if (p.has("comment")) desc = asText(p, "comment");
         r.setDescription(desc);
 
-        // asociar producto: primero por productCode, luego por productId
         Integer productCode = getInt(p, "productCode");
-        if (productCode == null && p.has("product_code")) productCode = getInt(p, "product_code");
+        if (productCode == null) productCode = getInt(p, "product_code");
         if (productCode != null) {
             Product prod = productRepository.findByProductCode(productCode);
             if (prod != null) r.setProduct(prod);
         } else if (p.has("productId")) {
-            try {
-                Integer pid = getInt(p, "productId");
-                if (pid != null) {
-                    productRepository.findById(pid).ifPresent(r::setProduct);
-                }
-            } catch (Exception ignore) {}
+            Integer pid = getInt(p, "productId");
+            if (pid != null) productRepository.findById(pid).ifPresent(r::setProduct);
         }
 
         if (r != null) reviewRepository.save(r);
