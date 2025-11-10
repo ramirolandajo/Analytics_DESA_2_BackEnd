@@ -306,9 +306,10 @@ public class EventDispatcherService {
         List<CartItem> items = new ArrayList<>();
         if (p.has("cart") && p.get("cart").isObject()) {
             JsonNode c = p.get("cart");
-            Integer externalId = getInt(c, "cartId");
-            if (externalId == null) externalId = getInt(c, "id");
-            cart.setExternalCartId(externalId);
+            Integer externalId = getInt(p, "purchaseId");
+            if (externalId != null) {
+                cart.setExternalCartId(externalId);
+            }
             Float finalPrice = asFloat(c, "finalPrice");
             if (finalPrice == null) finalPrice = asFloat(c, "final_price");
             cart.setFinalPrice(finalPrice);
