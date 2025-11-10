@@ -57,20 +57,22 @@ public class EventDispatcherService {
     // INVENTARIO
     @Transactional
     public void handleInventory(String normalizedType, JsonNode payload) {
+        // desanidar si vino envuelto
+        JsonNode p = unwrap(payload);
         switch (normalizedType) {
-            case "put: actualizar stock" -> handleActualizarStock(payload);
-            case "post: agregar un producto" -> handleUpsertProducto(payload);
-            case "patch: modificar un producto" -> handleUpsertProducto(payload);
-            case "patch: producto desactivado" -> handleProductoActivo(payload, false);
-            case "patch: producto activado", "patch: activar producto" -> handleProductoActivo(payload, true);
-            case "put: producto actualizado" -> handleUpsertProducto(payload);
-            case "post: marca creada" -> handleMarca(payload, true);
-            case "patch: marca desactivada" -> handleMarca(payload, false);
-            case "patch: marca activada" -> handleMarca(payload, true);
-            case "post: categoría creada", "post: categoria creada" -> handleCategoria(payload, true);
-            case "patch: categoria desactivada", "patch: categoría desactivada" -> handleCategoria(payload, false);
-            case "patch: categoria activada", "patch: categoría activada" -> handleCategoria(payload, true);
-            case "post: agregar productos (batch)", "post: agregar productos batch" -> handleBatchProductos(payload);
+            case "put: actualizar stock" -> handleActualizarStock(p);
+            case "post: agregar un producto" -> handleUpsertProducto(p);
+            case "patch: modificar un producto" -> handleUpsertProducto(p);
+            case "patch: producto desactivado" -> handleProductoActivo(p, false);
+            case "patch: producto activado", "patch: activar producto" -> handleProductoActivo(p, true);
+            case "put: producto actualizado" -> handleUpsertProducto(p);
+            case "post: marca creada" -> handleMarca(p, true);
+            case "patch: marca desactivada" -> handleMarca(p, false);
+            case "patch: marca activada" -> handleMarca(p, true);
+            case "post: categoría creada", "post: categoria creada" -> handleCategoria(p, true);
+            case "patch: categoria desactivada", "patch: categoría desactivada" -> handleCategoria(p, false);
+            case "patch: categoria activada", "patch: categoría activada" -> handleCategoria(p, true);
+            case "post: agregar productos (batch)", "post: agregar productos batch" -> handleBatchProductos(p);
             default -> log.info("Evento inventario ignorado: {}", normalizedType);
         }
     }
@@ -175,8 +177,11 @@ public class EventDispatcherService {
             prod.setMediaSrc(imgs);
         }
         if (p.has("new")) prod.setNew(p.get("new").asBoolean());
+        else if (p.has("is_new")) prod.setNew(p.get("is_new").asBoolean());
         if (p.has("bestSeller")) prod.setBestseller(p.get("bestSeller").asBoolean());
+        else if (p.has("is_best_seller")) prod.setBestseller(p.get("is_best_seller").asBoolean());
         if (p.has("featured")) prod.setFeatured(p.get("featured").asBoolean());
+        else if (p.has("is_featured")) prod.setFeatured(p.get("is_featured").asBoolean());
         if (p.has("hero")) prod.setHero(p.get("hero").asBoolean());
         if (p.has("active")) prod.setActive(p.get("active").asBoolean());
 
@@ -207,11 +212,14 @@ public class EventDispatcherService {
 
     private Set<Category> resolveCategories(JsonNode p) {
         Set<Category> cats = new HashSet<>();
+        // prefer categories
         if (p.has("categories") && p.get("categories").isArray()) {
             for (JsonNode c : p.get("categories")) {
                 Integer code = null;
                 if (c.isInt()) code = c.asInt();
-                else if (c.isObject()) {
+                else if (c.isTextual()) {
+                    try { code = Integer.valueOf(c.asText()); } catch (Exception ignore) {}
+                } else if (c.isObject()) {
                     if (c.hasNonNull("code")) code = c.get("code").asInt();
                     else if (c.hasNonNull("categoryCode")) code = c.get("categoryCode").asInt();
                     else if (c.hasNonNull("id")) {
@@ -219,6 +227,18 @@ public class EventDispatcherService {
                         if (cat != null) cats.add(cat);
                         continue;
                     }
+                }
+                if (code != null) {
+                    Category cat = categoryRepository.findByCategoryCode(code);
+                    if (cat != null) cats.add(cat);
+                }
+            }
+        } else if (p.has("categoryCodes") && p.get("categoryCodes").isArray()) {
+            // fallback a categoryCodes
+            for (JsonNode c : p.get("categoryCodes")) {
+                Integer code = c.isInt() ? c.asInt() : null;
+                if (code == null && c.isTextual()) {
+                    try { code = Integer.valueOf(c.asText()); } catch (Exception ignore) {}
                 }
                 if (code != null) {
                     Category cat = categoryRepository.findByCategoryCode(code);
@@ -247,13 +267,15 @@ public class EventDispatcherService {
 
     // VENTAS
     public void handleSales(String normalizedType, JsonNode payload) {
+        // desanidar si vino envuelto
+        JsonNode p = unwrap(payload);
         switch (normalizedType) {
-            case "post: compra confirmada" -> handleCompraConfirmada(payload);
-            case "post: compra pendiente", "delete: compra cancelada" -> saveAnalyticsEvent(normalizedType, payload);
-            case "post: review creada" -> handleReview(payload);
-            case "post: producto agregado a favoritos" -> handleFavAdd(payload);
-            case "delete: producto quitado de favoritos" -> handleFavRemove(payload);
-            case "get: vista diaria de productos" -> handleVistaDiaria(payload);
+            case "post: compra confirmada" -> handleCompraConfirmada(p);
+            case "post: compra pendiente", "delete: compra cancelada" -> saveAnalyticsEvent(normalizedType, payload); // mantener crudo en logs
+            case "post: review creada" -> handleReview(p);
+            case "post: producto agregado a favoritos" -> handleFavAdd(p);
+            case "delete: producto quitado de favoritos" -> handleFavRemove(p);
+            case "get: vista diaria de productos" -> handleVistaDiaria(p);
             case "post: stock rollback - compra cancelada", "stockrollback_cartcancelled" -> saveAnalyticsEvent(normalizedType, payload);
             default -> log.info("Evento ventas ignorado: {}", normalizedType);
         }
@@ -396,9 +418,19 @@ public class EventDispatcherService {
     }
 
     private void handleVistaDiaria(JsonNode p) {
-        if (p == null || !p.isArray()) return;
-        for (JsonNode n : p) {
+        // Puede venir como arreglo directo o como objeto con key "views"
+        if (p == null) return;
+        JsonNode arr = p;
+        if (!p.isArray() && p.has("views") && p.get("views").isArray()) {
+            arr = p.get("views");
+        }
+        if (!arr.isArray()) return;
+        for (JsonNode n : arr) {
             Integer productCode = getInt(n, "productCode");
+            // soportar productCode como string
+            if (productCode == null && n.has("productCode") && n.get("productCode").isTextual()) {
+                try { productCode = Integer.valueOf(n.get("productCode").asText()); } catch (Exception ignore) {}
+            }
             Integer viewedAt = getInt(n, "viewedAt");
             View v = new View();
             v.setViewedAt(viewedAt != null ? LocalDateTime.ofEpochSecond(viewedAt, 0, java.time.ZoneOffset.UTC) : LocalDateTime.now());
@@ -409,12 +441,15 @@ public class EventDispatcherService {
             }
             viewRepository.save(v);
         }
-        meterRegistry.counter("analytics.sales.view.daily").increment(p.size());
+        meterRegistry.counter("analytics.sales.view.daily").increment(arr.size());
     }
 
     // helpers
     private Integer getInt(JsonNode p, String field) {
-        return (p != null && p.has(field) && !p.get(field).isNull()) ? p.get(field).asInt() : null;
+        return (p != null && p.has(field) && !p.get(field).isNull()) ? (p.get(field).isInt() ? p.get(field).asInt() : parseIntSafe(p.get(field).asText())) : null;
+    }
+    private Integer parseIntSafe(String s) {
+        try { return s == null ? null : Integer.valueOf(s); } catch (Exception e) { return null; }
     }
     private Float asFloat(JsonNode p, String field) {
         return (p != null && p.has(field) && !p.get(field).isNull()) ? (float) p.get(field).asDouble() : null;
@@ -427,6 +462,20 @@ public class EventDispatcherService {
         List<Integer> r = new ArrayList<>();
         p.get(field).forEach(n -> r.add(n.asInt()));
         return r;
+    }
+
+    private JsonNode unwrap(JsonNode p) {
+        // desanidar 2 niveles como máximo: payload -> payload
+        if (p == null) return null;
+        JsonNode cur = p;
+        for (int i = 0; i < 2; i++) {
+            if (cur != null && cur.has("payload") && cur.get("payload").isObject()) {
+                cur = cur.get("payload");
+            } else {
+                break;
+            }
+        }
+        return cur;
     }
 
     // Safe helpers to avoid passing nulls to Mockito stubs and to handle null MeterRegistry
