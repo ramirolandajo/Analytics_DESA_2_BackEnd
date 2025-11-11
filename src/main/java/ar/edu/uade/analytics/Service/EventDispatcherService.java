@@ -167,6 +167,11 @@ public class EventDispatcherService {
         if (productCode == null) productCode = getInt(p, "product_code"); // alias adicional
         if (productCode == null) productCode = getInt(p, "code");
         if (productCode == null) return;
+
+        // Capturar stock anterior desde BD antes de tocar la entidad (evita 0 cuando no está cargada en el contexto)
+        Integer persistedOldStock = productRepository.findStockByProductCode(productCode);
+        Integer oldStock = persistedOldStock != null ? persistedOldStock : 0;
+
         Product prod = Optional.ofNullable(productRepository.findByProductCode(productCode)).orElseGet(Product::new);
         boolean creating = prod.getId() == null;
         prod.setProductCode(productCode);
@@ -176,7 +181,9 @@ public class EventDispatcherService {
         else if (p.has("unit_price")) prod.setPriceUnit(asFloat(p, "unit_price"));
         if (p.has("price")) prod.setPrice(asFloat(p, "price"));
         if (p.has("discount")) prod.setDiscount(asFloat(p, "discount"));
-        if (p.has("stock")) prod.setStock(getInt(p, "stock"));
+        Integer newStock = null;
+        if (p.has("stock")) newStock = getInt(p, "stock");
+        if (newStock != null) prod.setStock(newStock); // sólo setear si vino en el payload
         if (p.has("calification")) prod.setCalification(asFloat(p, "calification"));
         if (p.has("images") && p.get("images").isArray()) {
             List<String> imgs = new ArrayList<>();
@@ -199,6 +206,21 @@ public class EventDispatcherService {
         if (!categories.isEmpty()) prod.setCategories(categories);
 
         prod = safeSaveProduct(prod);
+
+        // Registrar log de cambio de stock SI el payload trae stock y difiere del previo (o creación)
+        if (newStock != null && (creating || !Objects.equals(oldStock, newStock))) {
+            StockChangeLog scl = new StockChangeLog();
+            scl.setProduct(prod);
+            scl.setOldStock(oldStock);
+            scl.setNewStock(newStock);
+            scl.setQuantityChanged(newStock - oldStock);
+            scl.setChangedAt(LocalDateTime.now());
+            String reason = creating ? "Creación de producto" : "Modificación de producto";
+            scl.setReason(reason);
+            stockChangeLogRepository.save(scl);
+            safeIncrement("analytics.inventory.stock.log");
+        }
+
         safeIncrement("analytics.inventory.product.upsert", 1.0, "creating", String.valueOf(creating));
     }
 
