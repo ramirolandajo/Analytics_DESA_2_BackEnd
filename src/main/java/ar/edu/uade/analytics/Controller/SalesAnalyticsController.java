@@ -41,6 +41,9 @@ public class SalesAnalyticsController {
     @Autowired
     private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
+    @Autowired
+    private ar.edu.uade.analytics.Service.StockHistoryService stockHistoryService;
+
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getSalesSummary(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
@@ -538,164 +541,21 @@ public class SalesAnalyticsController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/stock-history-by-product-code")
-    public ResponseEntity<Map<String, Object>> getStockHistoryByProductCode(
-            @RequestParam("productCode") Integer productCode,
-            @RequestParam(required = false, defaultValue = "false") boolean showProfit,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        ar.edu.uade.analytics.Repository.ProductRepository pr = purchaseService.getProductRepository();
-        if (pr == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Product repository not available"));
-        }
-        ar.edu.uade.analytics.Entity.Product product = pr.findByProductCode(productCode);
-        if (product == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Producto no encontrado"));
-        }
 
-        List<Map<String, Object>> allEvents = new ArrayList<>();
 
-        // 1. Logs de cambio de stock (existentes)
-        List<ar.edu.uade.analytics.Entity.StockChangeLog> logs =
-                stockChangeLogRepository.findByProductIdOrderByChangedAtAsc(product.getId());
-        float profitAccum = 0f;
-        for (ar.edu.uade.analytics.Entity.StockChangeLog log : logs) {
-            LocalDateTime fecha = log.getChangedAt();
-            if (fecha == null) continue;
-            if ((startDate == null || !fecha.isBefore(startDate)) && (endDate == null || !fecha.isAfter(endDate))) {
-                Map<String, Object> info = new HashMap<>();
-                info.put("date", fecha.toLocalDate().toString());
-                info.put("oldStock", log.getOldStock());
-                info.put("newStock", log.getNewStock());
-                info.put("quantityChanged", log.getQuantityChanged());
-                info.put("reason", log.getReason());
-                float profit = 0f;
-                if (showProfit && "Venta".equalsIgnoreCase(log.getReason())) {
-                    Float price = product.getPrice() != null ? product.getPrice() : 0f;
-                    profit = price * Math.abs(log.getQuantityChanged());
-                }
-                profitAccum += profit;
-                info.put("profit", profit);
-                info.put("profitAccumulated", profitAccum);
-                // Para ordenación posterior
-                info.put("_eventDateTime", fecha);
-                allEvents.add(info);
+        @GetMapping("/stock-history-by-product-code")
+        public ResponseEntity<Map<String, Object>> getStockHistoryByProductCode(
+                @RequestParam("productCode") Integer productCode,
+                @RequestParam(required = false, defaultValue = "false") boolean showProfit,
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+
+            Map<String, Object> result = stockHistoryService.getStockHistoryByProductCode(productCode, showProfit, startDate, endDate);
+            if (result.containsKey("error")) {
+                return ResponseEntity.badRequest().body(result);
             }
+            return ResponseEntity.ok(result);
         }
-
-        // 2. Eventos de modificación de producto que alteran stock (ConsumedEventLog)
-        List<ar.edu.uade.analytics.Entity.ConsumedEventLog> modLogs =
-                consumedEventLogRepository.findByStatusAndEventTypeContainingIgnoreCaseOrderByProcessedAtAsc(
-                        ar.edu.uade.analytics.Entity.ConsumedEventLog.Status.PROCESSED, "Producto");
-        for (ar.edu.uade.analytics.Entity.ConsumedEventLog ev : modLogs) {
-            // Filtrar por rango temporal
-            OffsetDateTime processedAt = ev.getProcessedAt();
-            if (processedAt == null) continue;
-            LocalDateTime fecha = processedAt.toLocalDateTime();
-            if ((startDate != null && fecha.isBefore(startDate)) || (endDate != null && fecha.isAfter(endDate))) continue;
-
-            try {
-                Map<?, ?> root = objectMapper.readValue(ev.getPayloadJson(), Map.class);
-                Object payload = root.get("payload");
-                if (!(payload instanceof Map<?, ?> payloadMap)) continue;
-
-                // Intentar obtener productCode dentro del payload
-                Integer code = null;
-                Object pc = payloadMap.get("productCode");
-                if (pc instanceof Number) code = ((Number) pc).intValue();
-                // Alternativa: dentro de "product" subobjeto
-                if (code == null) {
-                    Object prodObj = payloadMap.get("product");
-                    if (prodObj instanceof Map<?, ?> prodMap) {
-                        Object pc2 = prodMap.get("productCode");
-                        if (pc2 instanceof Number) code = ((Number) pc2).intValue();
-                    }
-                }
-                if (code == null || !code.equals(productCode)) continue;
-
-                // Detectar campos de stock
-                Integer oldStock = null;
-                Integer newStock = null;
-                Object os = payloadMap.get("oldStock");
-                Object ns = payloadMap.get("newStock");
-                if (os instanceof Number) oldStock = ((Number) os).intValue();
-                if (ns instanceof Number) newStock = ((Number) ns).intValue();
-
-                // Algunos eventos podrían solo tener "stock"
-                if (newStock == null) {
-                    Object s = payloadMap.get("stock");
-                    if (s instanceof Number) newStock = ((Number) s).intValue();
-                }
-
-                Integer quantityChanged = null;
-                if (oldStock != null && newStock != null) {
-                    quantityChanged = newStock - oldStock;
-                }
-
-                // Incluir solo si realmente hay indicio de cambio de stock
-                if (oldStock != null || newStock != null) {
-                    Map<String, Object> info = new HashMap<>();
-                    info.put("date", fecha.toLocalDate().toString());
-                    info.put("oldStock", oldStock);
-                    info.put("newStock", newStock);
-                    info.put("quantityChanged", quantityChanged);
-                    info.put("reason", "Modificación de producto");
-                    float profit = 0f; // No se calcula profit por modificación
-                    info.put("profit", profit);
-                    profitAccum += profit;
-                    info.put("profitAccumulated", profitAccum);
-                    info.put("_eventDateTime", fecha);
-                    allEvents.add(info);
-                }
-            } catch (Exception ignored) { }
-        }
-
-        // 3. Ordenar todos los eventos por fecha/hora
-        allEvents.sort((a, b) -> {
-            LocalDateTime da = (LocalDateTime) a.get("_eventDateTime");
-            LocalDateTime db = (LocalDateTime) b.get("_eventDateTime");
-            return da.compareTo(db);
-        });
-
-        // Limpiar campo interno
-        for (Map<String, Object> m : allEvents) {
-            m.remove("_eventDateTime");
-        }
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("data", allEvents);
-        response.put("chartBase64", null);
-        return ResponseEntity.ok(response);
-    }
-    private Map<String, Object> computeSummaryFromCarts() {
-        List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
-        int totalVentas = carts != null ? carts.size() : 0;
-        float facturacionTotal = 0f;
-        int productosVendidos = 0;
-        Set<Integer> clientesActivos = new java.util.HashSet<>();
-        if (carts != null) {
-            for (ar.edu.uade.analytics.Entity.Cart c : carts) {
-                if (c == null) continue;
-                if (c.getFinalPrice() != null) facturacionTotal += c.getFinalPrice();
-                if (c.getItems() != null) {
-                    for (ar.edu.uade.analytics.Entity.CartItem item : c.getItems()) {
-                        if (item != null && item.getQuantity() != null) {
-                            productosVendidos += item.getQuantity();
-                        }
-                    }
-                }
-                if (c.getUser() != null && c.getUser().getId() != null) {
-                    clientesActivos.add(c.getUser().getId());
-                }
-            }
-        }
-        Map<String, Object> resumen = new HashMap<>();
-        resumen.put("totalVentas", totalVentas);
-        resumen.put("facturacionTotal", facturacionTotal);
-        resumen.put("productosVendidos", productosVendidos);
-        resumen.put("clientesActivos", clientesActivos.size());
-        return resumen;
-    }
 
     @GetMapping("/top-customers")
     public ResponseEntity<Map<String, Object>> getTopCustomers(
@@ -1004,5 +864,41 @@ public class SalesAnalyticsController {
         resp.put("data", data);
         resp.put("chartBase64", null);
         return ResponseEntity.ok(resp);
+    }
+
+
+    private Map<String, Object> computeSummaryFromCarts() {
+        float facturacionTotal = 0f;
+        int totalVentas = 0;
+        int productosVendidos = 0;
+        java.util.Set<Integer> clientesActivos = new java.util.HashSet<>();
+
+        java.util.List<ar.edu.uade.analytics.Entity.Cart> carts = cartRepository.findAll();
+        if (carts != null) {
+            for (ar.edu.uade.analytics.Entity.Cart c : carts) {
+                if (c == null) continue;
+                totalVentas++;
+                if (c.getFinalPrice() != null) {
+                    facturacionTotal += c.getFinalPrice();
+                }
+                if (c.getItems() != null) {
+                    for (ar.edu.uade.analytics.Entity.CartItem item : c.getItems()) {
+                        if (item != null && item.getQuantity() != null) {
+                            productosVendidos += item.getQuantity();
+                        }
+                    }
+                }
+                if (c.getUser() != null) {
+                    clientesActivos.add(c.getUser().getId());
+                }
+            }
+        }
+
+        java.util.Map<String, Object> resumen = new java.util.HashMap<>();
+        resumen.put("totalVentas", totalVentas);
+        resumen.put("facturacionTotal", facturacionTotal);
+        resumen.put("productosVendidos", productosVendidos);
+        resumen.put("clientesActivos", clientesActivos.size());
+        return resumen;
     }
 }
