@@ -131,14 +131,20 @@ public class ProductViewController {
         List<View> views = findViewsInRange(from, to);
         Map<Integer, Long> counts = aggregateByProductCode(views);
 
+        // Todos los productos conocidos (incluyendo los que no tuvieron vistas en el rango)
         Map<Integer, Product> productMap = productRepository.findAll().stream()
                 .filter(p -> p.getProductCode() != null)
                 .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
 
-        return counts.entrySet().stream()
-                .sorted(Map.Entry.comparingByValue())
+        return productMap.entrySet().stream()
+                .map(e -> {
+                    Integer code = e.getKey();
+                    long qty = counts.getOrDefault(code, 0L);
+                    return new ProductViewStats(code, e.getValue(), qty);
+                })
+                .sorted(Comparator.comparingLong(ProductViewStats::getQuantity)
+                        .thenComparing(pvs -> pvs.getProductCode() != null ? pvs.getProductCode() : Integer.MAX_VALUE))
                 .limit(10)
-                .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
     }
 
