@@ -5,6 +5,8 @@ import ar.edu.uade.analytics.Entity.Product;
 import ar.edu.uade.analytics.Entity.View;
 import ar.edu.uade.analytics.Repository.ProductRepository;
 import ar.edu.uade.analytics.Repository.ViewRepository;
+import ar.edu.uade.analytics.Service.ProductViewsBottomService;
+import ar.edu.uade.analytics.Service.ProductViewsTopService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +34,8 @@ public class ProductViewController {
     ProductRepository productRepository;
     @Autowired
     ViewRepository viewRepository;
+    @Autowired ProductViewsTopService productViewsTopService;
+    @Autowired ProductViewsBottomService productViewsBottomService;
 
 
     // GET: Sincronizar vistas de productos (mock)
@@ -106,13 +110,11 @@ public class ProductViewController {
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-        Map<Integer, Long> counts = calculateViewCounts(from, to);
+        Map<Integer, Long> counts = productViewsTopService.countViews(from, to);
         if (counts.isEmpty()) {
             return List.of();
         }
-
         Map<Integer, Product> productMap = buildProductMap();
-
         return counts.entrySet().stream()
                 .sorted(Map.Entry.<Integer, Long>comparingByValue(Comparator.reverseOrder())
                         .thenComparing(Map.Entry.comparingByKey()))
@@ -128,16 +130,12 @@ public class ProductViewController {
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-        Map<Integer, Long> counts = calculateViewCounts(from, to);
+        Map<Integer, Long> counts = productViewsBottomService.countViewsIncludingZeros(from, to);
         if (counts.isEmpty()) {
             return List.of();
         }
-
         Map<Integer, Product> productMap = buildProductMap();
-
         return counts.entrySet().stream()
-                .sorted(Map.Entry.<Integer, Long>comparingByValue()
-                        .thenComparing(Map.Entry.comparingByKey()))
                 .limit(10)
                 .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
