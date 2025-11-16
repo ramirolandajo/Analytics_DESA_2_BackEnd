@@ -61,12 +61,12 @@ public class ProductViewController {
     public static class ProductViewStats {
         private final String productCode;
         private final Product product; // objeto completo
-        private final long views; // cantidad de vistas
+        private final long quantity; // cantidad de vistas
 
-        public ProductViewStats(String productCode, Product product, long views) {
+        public ProductViewStats(String productCode, Product product, long quantity) {
             this.productCode = productCode;
             this.product = product;
-            this.views = views;
+            this.quantity = quantity;
         }
 
         public String getProductCode() {
@@ -77,33 +77,22 @@ public class ProductViewController {
             return product;
         }
 
-        public long getViews() {
-            return views;
+        public long getQuantity() {
+            return quantity;
         }
     }
 
-    // Helper: filtra por rango de fechas; por defecto, el día actual
+    // Helper: filtra por rango de fechas; por defecto, TODA la tabla
     private List<View> findViewsInRange(LocalDateTime from, LocalDateTime to) {
-        LocalDateTime start;
-        LocalDateTime end;
-
+        // Sin fechas: devolver toda la tabla
         if (from == null && to == null) {
-            LocalDate today = LocalDate.now();
-            start = today.atStartOfDay();
-            end = today.atTime(LocalTime.MAX);
-        } else if (from != null && to != null) {
-            start = from;
-            end = to;
-        } else if (from != null) {
-            start = from.toLocalDate().atStartOfDay();
-            end = from.toLocalDate().atTime(LocalTime.MAX);
-        } else {
-            start = to.toLocalDate().atStartOfDay();
-            end = to;
+            return viewRepository.findAll();
         }
 
         return viewRepository.findAll().stream()
-                .filter(v -> v.getViewedAt() != null && !v.getViewedAt().isBefore(start) && !v.getViewedAt().isAfter(end))
+                .filter(v -> v.getViewedAt() != null)
+                .filter(v -> from == null || !v.getViewedAt().isBefore(from)) // v >= from si from está
+                .filter(v -> to == null || !v.getViewedAt().isAfter(to))     // v <= to si to está
                 .collect(Collectors.toList());
     }
 
@@ -111,17 +100,17 @@ public class ProductViewController {
     private Map<String, Long> aggregateByProductCode(List<View> views) {
         return views.stream()
                 .map(v -> {
-                    String code = String.valueOf(v.getProductCode());
-                    if (code == null && v.getProduct() != null) {
-                        code = String.valueOf(v.getProduct().getProductCode());
+                    Integer codeInt = v.getProductCode();
+                    if (codeInt == null && v.getProduct() != null) {
+                        codeInt = v.getProduct().getProductCode();
                     }
-                    return code;
+                    return codeInt != null ? String.valueOf(codeInt) : null;
                 })
                 .filter(code -> code != null)
                 .collect(Collectors.groupingBy(code -> code, Collectors.counting()));
     }
 
-    // GET: top 10 productos más vistos en el rango
+    // GET: top 10 productos más vistos en el rango (o total)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/top")
     public List<ProductViewStats> getTop10ProductViews(
@@ -142,7 +131,7 @@ public class ProductViewController {
                 .collect(Collectors.toList());
     }
 
-    // GET: bottom 10 productos menos vistos en el rango
+    // GET: bottom 10 productos menos vistos en el rango (o total)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/bottom")
     public List<ProductViewStats> getBottom10ProductViews(
