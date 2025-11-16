@@ -123,33 +123,20 @@ public class ProductViewController {
                 .collect(Collectors.toList());
     }
 
-    // GET: lista completa de productos menos vistos en el rango (incluye 0 por defecto)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/bottom")
-    public List<ProductViewStats> getBottomProducts(
-            @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
-            @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
-            @RequestParam(value = "includeZeros", required = false, defaultValue = "true") boolean includeZeros) {
-
-        Map<Integer, Long> counts = includeZeros ?
-                productViewsBottomService.countViewsIncludingZeros(from, to) :
-                productViewsBottomService.countViewsExcludingZeros(from, to);
-
-        Map<Integer, Product> productMap = buildProductMap();
-        return counts.entrySet().stream()
-                .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
-                .collect(Collectors.toList());
-    }
-
-    // GET: todos los productos con su cantidad de vistas (0 si no hay), sin ordenar por cantidad
-    @Transactional(readOnly = true, timeout = 60)
-    @GetMapping("/daily/all")
-    public List<ProductViewStats> getAllProductsWithViews(
+    public List<ProductViewStats> getBottom10ProductViews(
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
-        Map<Integer, Long> counts = productViewsBottomService.countViewsForAllProducts(from, to);
+
+        Map<Integer, Long> counts = productViewsBottomService.countViewsExcludingZeros(from, to);
+
+        if (counts.isEmpty()) {
+            return List.of();
+        }
         Map<Integer, Product> productMap = buildProductMap();
         return counts.entrySet().stream()
+                .limit(10)
                 .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
     }
