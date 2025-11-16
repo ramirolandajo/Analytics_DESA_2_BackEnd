@@ -82,22 +82,39 @@ public class ProductViewController {
 
     // Helper: filtra por rango de fechas; por defecto, TODA la tabla
     private List<View> findViewsInRange(LocalDateTime from, LocalDateTime to) {
+        List<View> allViews = viewRepository.findAll();
+
+        // Sin fechas: devolver TODAS las vistas
         if (from == null && to == null) {
-            return viewRepository.findAll();
+            return allViews;
         }
-        return viewRepository.findAll().stream()
+
+        // Con fechas: filtrar por rango
+        return allViews.stream()
                 .filter(v -> v.getViewedAt() != null)
-                .filter(v -> from == null || !v.getViewedAt().isBefore(from))
-                .filter(v -> to == null || !v.getViewedAt().isAfter(to))
+                .filter(v -> {
+                    boolean afterFrom = (from == null || !v.getViewedAt().isBefore(from));
+                    boolean beforeTo = (to == null || !v.getViewedAt().isAfter(to));
+                    return afterFrom && beforeTo;
+                })
                 .collect(Collectors.toList());
     }
 
     // Helper: agrupa cantidad de vistas por productCode
     private Map<Integer, Long> aggregateByProductCode(List<View> views) {
-        return views.stream()
-                .map(v -> v.getProductCode() != null ? v.getProductCode() : (v.getProduct() != null ? v.getProduct().getProductCode() : null))
+        Map<Integer, Long> counts = views.stream()
+                .map(v -> {
+                    Integer code = v.getProductCode();
+                    // Si productCode es null, intentar obtenerlo de la relación Product
+                    if (code == null && v.getProduct() != null) {
+                        code = v.getProduct().getProductCode();
+                    }
+                    return code;
+                })
                 .filter(code -> code != null)
                 .collect(Collectors.groupingBy(code -> code, Collectors.counting()));
+
+        return counts;
     }
 
     // GET: top 10 productos más vistos en el rango (o total)
