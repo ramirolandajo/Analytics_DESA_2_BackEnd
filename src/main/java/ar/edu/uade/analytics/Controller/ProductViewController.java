@@ -83,18 +83,10 @@ public class ProductViewController {
     private Map<Integer, Long> calculateViewCounts(LocalDateTime from, LocalDateTime to) {
         LocalDateTime normalizedFrom = from;
         LocalDateTime normalizedTo = to;
-
-        if (from != null && to == null) {
-            normalizedFrom = from.toLocalDate().atStartOfDay();
-            normalizedTo = from.toLocalDate().atTime(23, 59, 59, 999_999_999);
-        } else if (from == null && to != null) {
-            normalizedFrom = to.toLocalDate().atStartOfDay();
-            normalizedTo = to;
-        } else if (from != null && to != null && from.isAfter(to)) {
+        if (from != null && to != null && from.isAfter(to)) {
             normalizedFrom = to;
             normalizedTo = from;
         }
-
         return viewRepository.countViewsByProductCode(normalizedFrom, normalizedTo).stream()
                 .collect(Collectors.toMap(ViewRepository.ProductViewsCount::getProductCode,
                         ViewRepository.ProductViewsCount::getTotalViews));
@@ -128,7 +120,7 @@ public class ProductViewController {
                 .collect(Collectors.toList());
     }
 
-    // GET: bottom 10 productos menos vistos en el rango (o total)
+    // GET: bottom 10 productos menos vistos en el rango (solo desde tabla view)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/bottom")
     public List<ProductViewStats> getBottom10ProductViews(
