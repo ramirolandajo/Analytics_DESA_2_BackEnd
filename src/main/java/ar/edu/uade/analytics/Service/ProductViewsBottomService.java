@@ -25,14 +25,30 @@ public class ProductViewsBottomService {
     private LocalDateTime[] normalize(LocalDateTime from, LocalDateTime to) {
         LocalDateTime f = from;
         LocalDateTime t = to;
-        if (f == null && t == null) {
-            LocalDate today = LocalDate.now();
-            f = today.atStartOfDay();
-            t = today.atTime(LocalTime.MAX);
-        } else if (f != null && t != null && f.isAfter(t)) {
+        // Si no hay fechas: no acotar (toda la tabla)
+        if (f != null && t != null && f.isAfter(t)) {
             f = to; t = from; // swap
         }
         return new LocalDateTime[]{f, t};
+    }
+
+    // Mapa completo: todos los productos con su cantidad de vistas (0 si no hay)
+    public Map<Integer, Long> countViewsForAllProducts(LocalDateTime from, LocalDateTime to) {
+        LocalDateTime[] norm = normalize(from, to);
+        LocalDateTime f = norm[0], t = norm[1];
+
+        Map<Integer, Long> counts = viewRepository.countViewsByProductCode(f, t).stream()
+                .collect(Collectors.toMap(ViewRepository.ProductViewsCount::getProductCode,
+                        ViewRepository.ProductViewsCount::getTotalViews));
+
+        for (Product p : productRepository.findAll()) {
+            Integer code = p.getProductCode();
+            if (code != null) counts.putIfAbsent(code, 0L);
+        }
+        // Orden natural por productCode para consistencia
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a,b)->a, LinkedHashMap::new));
     }
 
     // Incluye ceros (productos nunca vistos en el rango)
