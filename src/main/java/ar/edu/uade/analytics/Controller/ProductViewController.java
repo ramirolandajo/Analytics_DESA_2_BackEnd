@@ -117,6 +117,7 @@ public class ProductViewController {
         return counts;
     }
 
+
     // GET: top 10 productos más vistos en el rango (o total)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/top")
