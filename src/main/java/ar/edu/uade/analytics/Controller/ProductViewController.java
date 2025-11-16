@@ -80,41 +80,22 @@ public class ProductViewController {
         public long getViews() { return quantity; }
     }
 
-    // Helper: filtra por rango de fechas; por defecto, TODA la tabla
-    private List<View> findViewsInRange(LocalDateTime from, LocalDateTime to) {
-        List<View> allViews = viewRepository.findAll();
-
-        // Sin fechas: devolver TODAS las vistas
-        if (from == null && to == null) {
-            return allViews;
+    private Map<Integer, Long> calculateViewCounts(LocalDateTime from, LocalDateTime to) {
+        LocalDateTime normalizedFrom = from;
+        LocalDateTime normalizedTo = to;
+        if (from != null && to != null && from.isAfter(to)) {
+            normalizedFrom = to;
+            normalizedTo = from;
         }
-
-        // Con fechas: filtrar por rango
-        return allViews.stream()
-                .filter(v -> v.getViewedAt() != null)
-                .filter(v -> {
-                    boolean afterFrom = (from == null || !v.getViewedAt().isBefore(from));
-                    boolean beforeTo = (to == null || !v.getViewedAt().isAfter(to));
-                    return afterFrom && beforeTo;
-                })
-                .collect(Collectors.toList());
+        return viewRepository.countViewsByProductCode(normalizedFrom, normalizedTo).stream()
+                .collect(Collectors.toMap(ViewRepository.ProductViewsCount::getProductCode,
+                        ViewRepository.ProductViewsCount::getTotalViews));
     }
 
-    // Helper: agrupa cantidad de vistas por productCode
-    private Map<Integer, Long> aggregateByProductCode(List<View> views) {
-        Map<Integer, Long> counts = views.stream()
-                .map(v -> {
-                    Integer code = v.getProductCode();
-                    // Si productCode es null, intentar obtenerlo de la relación Product
-                    if (code == null && v.getProduct() != null) {
-                        code = v.getProduct().getProductCode();
-                    }
-                    return code;
-                })
-                .filter(code -> code != null)
-                .collect(Collectors.groupingBy(code -> code, Collectors.counting()));
-
-        return counts;
+    private Map<Integer, Product> buildProductMap() {
+        return productRepository.findAll().stream()
+                .filter(p -> p.getProductCode() != null)
+                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
     }
 
 
@@ -125,44 +106,40 @@ public class ProductViewController {
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-        List<View> views = findViewsInRange(from, to);
-        Map<Integer, Long> counts = aggregateByProductCode(views);
+        Map<Integer, Long> counts = calculateViewCounts(from, to);
+        if (counts.isEmpty()) {
+            return List.of();
+        }
 
-        Map<Integer, Product> productMap = productRepository.findAll().stream()
-                .filter(p -> p.getProductCode() != null)
-                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
+        Map<Integer, Product> productMap = buildProductMap();
 
         return counts.entrySet().stream()
-                .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
+                .sorted(Map.Entry.<Integer, Long>comparingByValue(Comparator.reverseOrder())
+                        .thenComparing(Map.Entry.comparingByKey()))
                 .limit(10)
                 .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
     }
 
-    // GET: bottom 10 productos menos vistos en el rango (o total)
+    // GET: bottom 10 productos menos vistos en el rango (solo desde tabla view)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/bottom")
     public List<ProductViewStats> getBottom10ProductViews(
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-        List<View> views = findViewsInRange(from, to);
-        Map<Integer, Long> counts = aggregateByProductCode(views);
+        Map<Integer, Long> counts = calculateViewCounts(from, to);
+        if (counts.isEmpty()) {
+            return List.of();
+        }
 
-        // Todos los productos conocidos (incluyendo los que no tuvieron vistas en el rango)
-        Map<Integer, Product> productMap = productRepository.findAll().stream()
-                .filter(p -> p.getProductCode() != null)
-                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
+        Map<Integer, Product> productMap = buildProductMap();
 
-        return productMap.entrySet().stream()
-                .map(e -> {
-                    Integer code = e.getKey();
-                    long qty = counts.getOrDefault(code, 0L);
-                    return new ProductViewStats(code, e.getValue(), qty);
-                })
-                .sorted(Comparator.comparingLong(ProductViewStats::getQuantity)
-                        .thenComparing(pvs -> pvs.getProductCode() != null ? pvs.getProductCode() : Integer.MAX_VALUE))
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.<Integer, Long>comparingByValue()
+                        .thenComparing(Map.Entry.comparingByKey()))
                 .limit(10)
+                .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
     }
 
