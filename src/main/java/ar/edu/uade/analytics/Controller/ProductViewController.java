@@ -16,11 +16,12 @@ import java.util.List;
 
 import org.springframework.format.annotation.DateTimeFormat;
 
-import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.Map;
 import java.util.Comparator;
 import java.util.stream.Collectors;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
 @RestController
 @RequestMapping("/product-views")
@@ -58,54 +59,43 @@ public class ProductViewController {
 
 
     // DTO de respuesta para stats
+    @JsonPropertyOrder({"productCode", "product", "quantity"})
     public static class ProductViewStats {
-        private final String productCode;
+        private final Integer productCode; // numérico
         private final Product product; // objeto completo
         private final long quantity; // cantidad de vistas
 
-        public ProductViewStats(String productCode, Product product, long quantity) {
+        public ProductViewStats(Integer productCode, Product product, long quantity) {
             this.productCode = productCode;
             this.product = product;
             this.quantity = quantity;
         }
 
-        public String getProductCode() {
-            return productCode;
-        }
-
-        public Product getProduct() {
-            return product;
-        }
-
-        public long getQuantity() {
-            return quantity;
-        }
+        public Integer getProductCode() { return productCode; }
+        public Product getProduct() { return product; }
+        @JsonProperty("quantity")
+        public long getQuantity() { return quantity; }
+        // Alias por compatibilidad
+        @JsonProperty("views")
+        public long getViews() { return quantity; }
     }
 
     // Helper: filtra por rango de fechas; por defecto, TODA la tabla
     private List<View> findViewsInRange(LocalDateTime from, LocalDateTime to) {
-        // Sin fechas: devolver toda la tabla
         if (from == null && to == null) {
             return viewRepository.findAll();
         }
-
         return viewRepository.findAll().stream()
                 .filter(v -> v.getViewedAt() != null)
-                .filter(v -> from == null || !v.getViewedAt().isBefore(from)) // v >= from si from está
-                .filter(v -> to == null || !v.getViewedAt().isAfter(to))     // v <= to si to está
+                .filter(v -> from == null || !v.getViewedAt().isBefore(from))
+                .filter(v -> to == null || !v.getViewedAt().isAfter(to))
                 .collect(Collectors.toList());
     }
 
     // Helper: agrupa cantidad de vistas por productCode
-    private Map<String, Long> aggregateByProductCode(List<View> views) {
+    private Map<Integer, Long> aggregateByProductCode(List<View> views) {
         return views.stream()
-                .map(v -> {
-                    Integer codeInt = v.getProductCode();
-                    if (codeInt == null && v.getProduct() != null) {
-                        codeInt = v.getProduct().getProductCode();
-                    }
-                    return codeInt != null ? String.valueOf(codeInt) : null;
-                })
+                .map(v -> v.getProductCode() != null ? v.getProductCode() : (v.getProduct() != null ? v.getProduct().getProductCode() : null))
                 .filter(code -> code != null)
                 .collect(Collectors.groupingBy(code -> code, Collectors.counting()));
     }
@@ -118,14 +108,14 @@ public class ProductViewController {
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
         List<View> views = findViewsInRange(from, to);
-        Map<String, Long> counts = aggregateByProductCode(views);
+        Map<Integer, Long> counts = aggregateByProductCode(views);
 
-        Map<String, Product> productMap = productRepository.findAll().stream()
+        Map<Integer, Product> productMap = productRepository.findAll().stream()
                 .filter(p -> p.getProductCode() != null)
-                .collect(Collectors.toMap(p -> String.valueOf(p.getProductCode()), p -> p, (a, b) -> a));
+                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
 
         return counts.entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue(Comparator.reverseOrder()))
+                .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
                 .limit(10)
                 .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
@@ -139,14 +129,14 @@ public class ProductViewController {
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
         List<View> views = findViewsInRange(from, to);
-        Map<String, Long> counts = aggregateByProductCode(views);
+        Map<Integer, Long> counts = aggregateByProductCode(views);
 
-        Map<String, Product> productMap = productRepository.findAll().stream()
+        Map<Integer, Product> productMap = productRepository.findAll().stream()
                 .filter(p -> p.getProductCode() != null)
-                .collect(Collectors.toMap(p -> String.valueOf(p.getProductCode()), p -> p, (a, b) -> a));
+                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
 
         return counts.entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue())
+                .sorted(Map.Entry.comparingByValue())
                 .limit(10)
                 .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
