@@ -18,12 +18,13 @@ public interface ViewRepository extends JpaRepository<View, Long> {
     }
 
     @Query("""
-            SELECT v.productCode AS productCode, COUNT(v) AS totalViews
+            SELECT COALESCE(v.productCode, p.productCode) AS productCode, COUNT(v) AS totalViews
             FROM View v
+            LEFT JOIN v.product p
             WHERE (:from IS NULL OR v.viewedAt >= :from)
               AND (:to IS NULL OR v.viewedAt <= :to)
-              AND v.productCode IS NOT NULL
-            GROUP BY v.productCode
+              AND (v.productCode IS NOT NULL OR p.productCode IS NOT NULL)
+            GROUP BY COALESCE(v.productCode, p.productCode)
             """)
     List<ProductViewsCount> countViewsByProductCode(
             @Param("from") LocalDateTime from,

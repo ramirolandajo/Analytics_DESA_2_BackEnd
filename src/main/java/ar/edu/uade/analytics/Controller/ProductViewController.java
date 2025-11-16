@@ -80,6 +80,32 @@ public class ProductViewController {
         public long getViews() { return quantity; }
     }
 
+    private Map<Integer, Long> calculateViewCounts(LocalDateTime from, LocalDateTime to) {
+        LocalDateTime normalizedFrom = from;
+        LocalDateTime normalizedTo = to;
+
+        if (from != null && to == null) {
+            normalizedFrom = from.toLocalDate().atStartOfDay();
+            normalizedTo = from.toLocalDate().atTime(23, 59, 59, 999_999_999);
+        } else if (from == null && to != null) {
+            normalizedFrom = to.toLocalDate().atStartOfDay();
+            normalizedTo = to;
+        } else if (from != null && to != null && from.isAfter(to)) {
+            normalizedFrom = to;
+            normalizedTo = from;
+        }
+
+        return viewRepository.countViewsByProductCode(normalizedFrom, normalizedTo).stream()
+                .collect(Collectors.toMap(ViewRepository.ProductViewsCount::getProductCode,
+                        ViewRepository.ProductViewsCount::getTotalViews));
+    }
+
+    private Map<Integer, Product> buildProductMap() {
+        return productRepository.findAll().stream()
+                .filter(p -> p.getProductCode() != null)
+                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
+    }
+
     // GET: top 10 productos más vistos en el rango (o total)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/top")
@@ -87,19 +113,18 @@ public class ProductViewController {
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-        List<ViewRepository.ProductViewsCount> counts = viewRepository.countViewsByProductCode(from, to);
+        Map<Integer, Long> counts = calculateViewCounts(from, to);
         if (counts.isEmpty()) {
             return List.of();
         }
 
-        Map<Integer, Product> productMap = productRepository.findAll().stream()
-                .filter(p -> p.getProductCode() != null)
-                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
+        Map<Integer, Product> productMap = buildProductMap();
 
-        return counts.stream()
-                .sorted(Comparator.comparing(ViewRepository.ProductViewsCount::getTotalViews, Comparator.reverseOrder()))
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.<Integer, Long>comparingByValue(Comparator.reverseOrder())
+                        .thenComparing(Map.Entry.comparingByKey()))
                 .limit(10)
-                .map(c -> new ProductViewStats(c.getProductCode(), productMap.get(c.getProductCode()), c.getTotalViews()))
+                .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
     }
 
@@ -110,20 +135,18 @@ public class ProductViewController {
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-        List<ViewRepository.ProductViewsCount> counts = viewRepository.countViewsByProductCode(from, to);
+        Map<Integer, Long> counts = calculateViewCounts(from, to);
         if (counts.isEmpty()) {
             return List.of();
         }
 
-        Map<Integer, Product> productMap = productRepository.findAll().stream()
-                .filter(p -> p.getProductCode() != null)
-                .collect(Collectors.toMap(Product::getProductCode, p -> p, (a, b) -> a));
+        Map<Integer, Product> productMap = buildProductMap();
 
-        return counts.stream()
-                .sorted(Comparator.comparing(ViewRepository.ProductViewsCount::getTotalViews)
-                        .thenComparing(ViewRepository.ProductViewsCount::getProductCode))
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.<Integer, Long>comparingByValue()
+                        .thenComparing(Map.Entry.comparingByKey()))
                 .limit(10)
-                .map(c -> new ProductViewStats(c.getProductCode(), productMap.get(c.getProductCode()), c.getTotalViews()))
+                .map(e -> new ProductViewStats(e.getKey(), productMap.get(e.getKey()), e.getValue()))
                 .collect(Collectors.toList());
     }
 
