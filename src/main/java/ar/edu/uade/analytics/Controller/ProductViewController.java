@@ -123,14 +123,17 @@ public class ProductViewController {
                 .collect(Collectors.toList());
     }
 
-    // GET: bottom 10 productos menos vistos en el rango (solo desde tabla view)
     @Transactional(readOnly = true, timeout = 60)
     @GetMapping("/daily/bottom")
     public List<ProductViewStats> getBottom10ProductViews(
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
-            @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+            @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
+            @RequestParam(value = "includeZeros", required = false, defaultValue = "false") boolean includeZeros) {
 
-        Map<Integer, Long> counts = productViewsBottomService.countViewsIncludingZeros(from, to);
+        Map<Integer, Long> counts = includeZeros ?
+                productViewsBottomService.countViewsIncludingZeros(from, to) :
+                productViewsBottomService.countViewsExcludingZeros(from, to);
+
         if (counts.isEmpty()) {
             return List.of();
         }
