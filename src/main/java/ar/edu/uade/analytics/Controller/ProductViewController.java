@@ -16,18 +16,14 @@ import java.util.List;
 
 import org.springframework.format.annotation.DateTimeFormat;
 
-import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Comparator;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/product-views")
+@RequestMapping("/product-views")
 public class ProductViewController {
     @Autowired
     KafkaMockService kafkaMockServiceSync;
@@ -66,7 +62,7 @@ public class ProductViewController {
             private final String productCode;
             private final long views;
 
-            public ProductViewStats(String productCode, long views) {
+            public ProductViewStats(String productCode, long views, Product product) {
                 this.productCode = productCode;
                 this.views = views;
             }
@@ -119,37 +115,46 @@ public class ProductViewController {
                     .collect(Collectors.groupingBy(code -> code, Collectors.counting()));
         }
 
-        // GET: top 10 productos más vistos en el rango
-        @Transactional(readOnly = true, timeout = 60)
-        @GetMapping("/daily/top")
-        public List<ProductViewStats> getTop10ProductViews(
-                @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
-                @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+       // GET: top 10 productos más vistos en el rango
+               @Transactional(readOnly = true, timeout = 60)
+               @GetMapping("/daily/top")
+               public List<ProductViewStats> getTop10ProductViews(
+                       @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+                       @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-            List<View> views = findViewsInRange(from, to);
-            Map<String, Long> counts = aggregateByProductCode(views);
+                   List<View> views = findViewsInRange(from, to);
+                   Map<String, Long> counts = aggregateByProductCode(views);
 
-            return counts.entrySet().stream()
-                    .sorted(Map.Entry.<String, Long>comparingByValue(Comparator.reverseOrder()))
-                    .limit(10)
-                    .map(e -> new ProductViewStats(e.getKey(), e.getValue()))
-                    .collect(Collectors.toList());
-        }
+                   Map<String, Product> productMap = productRepository.findAll().stream()
+                           .filter(p -> p.getProductCode() != null)
+                           .collect(Collectors.toMap(p -> String.valueOf(p.getProductCode()), p -> p, (a, b) -> a));
 
-        // GET: bottom 10 productos menos vistos en el rango
-        @Transactional(readOnly = true, timeout = 60)
-        @GetMapping("/daily/bottom")
-        public List<ProductViewStats> getBottom10ProductViews(
-                @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
-                @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+                   return counts.entrySet().stream()
+                           .sorted(Map.Entry.<String, Long>comparingByValue(Comparator.reverseOrder()))
+                           .limit(10)
+                           .map(e -> new ProductViewStats(e.getKey(), e.getValue(), productMap.get(e.getKey())))
+                           .collect(Collectors.toList());
+               }
 
-            List<View> views = findViewsInRange(from, to);
-            Map<String, Long> counts = aggregateByProductCode(views);
+               // GET: bottom 10 productos menos vistos en el rango
+               @Transactional(readOnly = true, timeout = 60)
+               @GetMapping("/daily/bottom")
+               public List<ProductViewStats> getBottom10ProductViews(
+                       @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+                       @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
 
-            return counts.entrySet().stream()
-                    .sorted(Map.Entry.<String, Long>comparingByValue())
-                    .limit(10)
-                    .map(e -> new ProductViewStats(e.getKey(), e.getValue()))
-                    .collect(Collectors.toList());
-        }
+                   List<View> views = findViewsInRange(from, to);
+                   Map<String, Long> counts = aggregateByProductCode(views);
+
+                   Map<String, Product> productMap = productRepository.findAll().stream()
+                           .filter(p -> p.getProductCode() != null)
+                           .collect(Collectors.toMap(p -> String.valueOf(p.getProductCode()), p -> p, (a, b) -> a));
+
+                   return counts.entrySet().stream()
+                           .sorted(Map.Entry.<String, Long>comparingByValue())
+                           .limit(10)
+                           .map(e -> new ProductViewStats(e.getKey(), e.getValue(), productMap.get(e.getKey())))
+                           .collect(Collectors.toList());
+               }
+
 }
